@@ -15,6 +15,7 @@ if [[ $BATTERY_STATE == "discharging" && $BATTERY_LEVEL -le $BATTERY_THRESHOLD ]
   if [[ ! -f $NOTIFICATION_FLAG ]]; then
     send_notification $BATTERY_LEVEL
     touch $NOTIFICATION_FLAG
+    paplay ${HOME}/.local/share/omarchy/low-battery.mp3
   fi
 else
   rm -f $NOTIFICATION_FLAG
