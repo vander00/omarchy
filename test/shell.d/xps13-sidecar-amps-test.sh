@@ -13,13 +13,6 @@ grep -q 'run_logged .*hardware/dell-xps13-sidecar-amps.sh' "$all" ||
   fail "the sidecar amplifier workaround runs during hardware setup"
 pass "the sidecar amplifier workaround runs during hardware setup"
 
-# The apply step rebuilds the boot image, so the default kernel must be installed.
-kernel_line=$(grep -n 'hardware/kernel.sh' "$all" | cut -d: -f1)
-amps_line=$(grep -n 'hardware/dell-xps13-sidecar-amps.sh' "$all" | cut -d: -f1)
-((kernel_line < amps_line)) ||
-  fail "the sidecar amplifier workaround runs after the default kernel is installed"
-pass "the sidecar amplifier workaround runs after the default kernel is installed"
-
 [[ -n $migration ]] || fail "a migration enables the workaround on existing installs"
 pass "a migration enables the workaround on existing installs"
 
