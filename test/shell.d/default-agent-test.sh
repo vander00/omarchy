@@ -25,7 +25,10 @@ mkdir -p "$mock_bin" "$test_home"
 cat >"$mock_bin/omarchy-install-chromium-claude" <<'SH'
 #!/bin/bash
 echo claude-extension >>"$OMARCHY_TEST_STUB_LOG"
-[[ ${OMARCHY_TEST_EXTENSION_FAIL:-false} != "true" ]]
+if [[ ${OMARCHY_TEST_EXTENSION_FAIL:-false} == "true" ]]; then
+  echo "Extension installation failed" >&2
+  exit 1
+fi
 SH
 
 cat >"$mock_bin/omarchy-notification-send" <<'SH'
@@ -440,11 +443,14 @@ pass "default agent selects and opens every supported provider and alias"
 pass "default agent stores its selection in Omarchy user config"
 
 OMARCHY_TEST_AGENT_INSTALLED=true omarchy-default-agent pi
-if OMARCHY_TEST_AGENT_INSTALLED=true OMARCHY_TEST_EXTENSION_FAIL=true omarchy-default-agent claude >"$test_tmp/extension-failure" 2>&1; then
-  fail "Claude selection fails when browser extension installation fails"
-fi
-[[ $(omarchy-default-agent) == "pi" ]] || fail "extension installation failure preserves the default agent"
-pass "extension installation failure preserves the default agent"
+: >"$agent_open_log"
+OMARCHY_TEST_AGENT_INSTALLED=true OMARCHY_TEST_EXTENSION_FAIL=true omarchy-default-agent claude >"$test_tmp/extension-failure" 2>&1
+[[ $(omarchy-default-agent) == "claude" ]] || fail "extension installation failure still selects Claude"
+mapfile -d '' -t agent_open_args <"$agent_open_log"
+[[ ${agent_open_args[*]} == "omarchy-agent" ]] || fail "extension installation failure still launches Claude"
+[[ ! -s $test_tmp/extension-failure ]] || fail "extension installation failure is silent"
+pass "extension installation failure silently continues selecting and launching Claude"
+OMARCHY_TEST_AGENT_INSTALLED=true omarchy-default-agent pi
 : >"$notification_history"
 : >"$agent_open_log"
 : >"$terminal_log"
