@@ -75,7 +75,7 @@ crush)
   fi
   ;;
 claude)
-  command=(claude --permission-mode auto --chrome)
+  command=(claude --permission-mode auto)
   [[ -n ${prompt:-} ]] && command+=(-- "$prompt")
   ;;
 grok)
