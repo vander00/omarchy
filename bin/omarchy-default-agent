@@ -86,6 +86,11 @@ if ! agent_install; then
   exit 1
 fi
 
+if [[ $agent == "claude" ]] && ! omarchy-install-chromium-claude; then
+  echo "Could not install the Claude browser extension" >&2
+  exit 1
+fi
+
 mkdir -p "$(dirname "$agent_file")"
 printf '%s\n' "$agent" >"$agent_file"
 

@@ -22,6 +22,12 @@ menu_log="$test_tmp/menu"
 muse_login_log="$test_tmp/muse-login"
 mkdir -p "$mock_bin" "$test_home"
 
+cat >"$mock_bin/omarchy-install-chromium-claude" <<'SH'
+#!/bin/bash
+echo claude-extension >>"$OMARCHY_TEST_STUB_LOG"
+[[ ${OMARCHY_TEST_EXTENSION_FAIL:-false} != "true" ]]
+SH
+
 cat >"$mock_bin/omarchy-notification-send" <<'SH'
 #!/bin/bash
 printf '%s\0' "$@" >>"$OMARCHY_TEST_NOTIFICATION_HISTORY"
@@ -406,8 +412,15 @@ declare -A expected_packages=(
 for selection in "${!expected_agents[@]}"; do
   expected=${expected_agents[$selection]}
   : >"$agent_open_log"
+  : >"$stub_log"
   OMARCHY_TEST_AGENT_INSTALLED=true omarchy-default-agent "$selection"
   [[ $(omarchy-default-agent) == $expected ]] || fail "default agent canonicalizes $selection"
+
+  if [[ $expected == "claude" ]]; then
+    grep -qx claude-extension "$stub_log" || fail "Claude selection installs the browser extension"
+  else
+    [[ ! -s $stub_log ]] || fail "other agents do not install the Claude extension"
+  fi
 
   mapfile -d '' -t mise_args <"$mise_log"
   [[ ${mise_args[0]} == "use" && ${mise_args[1]} == "-g" ]] ||
@@ -427,6 +440,11 @@ pass "default agent selects and opens every supported provider and alias"
 pass "default agent stores its selection in Omarchy user config"
 
 OMARCHY_TEST_AGENT_INSTALLED=true omarchy-default-agent pi
+if OMARCHY_TEST_AGENT_INSTALLED=true OMARCHY_TEST_EXTENSION_FAIL=true omarchy-default-agent claude >"$test_tmp/extension-failure" 2>&1; then
+  fail "Claude selection fails when browser extension installation fails"
+fi
+[[ $(omarchy-default-agent) == "pi" ]] || fail "extension installation failure preserves the default agent"
+pass "extension installation failure preserves the default agent"
 : >"$notification_history"
 : >"$agent_open_log"
 : >"$terminal_log"
@@ -644,7 +662,7 @@ assert_launch pi pi "Review this project"
 assert_launch omp omp --auto-approve -- "Review this project"
 assert_launch opencode opencode --auto --prompt "Review this project"
 assert_launch ori ori code --interactive --prompt "Review this project"
-assert_launch claude claude --permission-mode auto -- "Review this project"
+assert_launch claude claude --permission-mode auto --chrome -- "Review this project"
 assert_launch codex codex --approve-for-me -- "Review this project"
 assert_launch muse muse --approval-mode never -- "Review this project"
 assert_launch crush crush run "Review this project"
@@ -672,7 +690,7 @@ assert_bypass pi pi
 assert_bypass omp omp --auto-approve
 assert_bypass opencode opencode --auto
 assert_bypass ori ori code
-assert_bypass claude claude --permission-mode auto
+assert_bypass claude claude --permission-mode auto --chrome
 assert_bypass codex codex --approve-for-me
 assert_bypass muse muse --approval-mode never
 assert_bypass crush crush --yolo
