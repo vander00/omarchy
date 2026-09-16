@@ -4,6 +4,19 @@ set -euo pipefail
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
 source "$SHELL_TEST_DIR/fixtures/passwordless-sudo-test.sh"
 
+quarantine="$test_tmp/var/lib/omarchy/sudoers-quarantine"
+quarantined_policy() {
+  local entry
+  for entry in "$quarantine"/*/; do
+    if [[ $(cat "$entry/name") == "$1" ]]; then
+      cat "$entry/policy"
+      return 0
+    fi
+  done
+  return 1
+}
+# The old writer accepted any $USER, so a basename can sit just under NAME_MAX.
+long_suffix=$(printf 'l%.0s' {1..223})
 (
   source "$library"
   printf 'deleteduser ALL=(ALL) NOPASSWD: ALL\n' >"$(rule_file 1000)"
@@ -11,17 +24,23 @@ source "$SHELL_TEST_DIR/fixtures/passwordless-sudo-test.sh"
   # The legacy command never validated the account name, so a manual or NSS
   # account outside the current policy still has its exact old grant removed.
   printf 'Alice ALL=(ALL) NOPASSWD: ALL\n' >"$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-Alice"
+  # The legacy writer produced the body with echo. Under BASH_ENV with
+  # xpg_echo, USER='ali\0143e' yields this filename with an 'alice' rule, so
+  # a suffix/body mismatch does not prove administrator authorship.
+  printf 'alice ALL=(ALL) NOPASSWD: ALL\n' >"$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-ali\\0143e"
+  printf 'alice ALL=(ALL) NOPASSWD: ALL\n' >"$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-$long_suffix"
   printf 'admin ALL=(ALL) NOPASSWD: /usr/bin/true\n' >"$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-custom"
-  printf 'Alice ALL=(ALL) NOPASSWD: ALL\n' >"$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-handwritten"
   TEST_DELETE_FAIL=1 assert_status 1 cleanup_all_locked
   [[ -e $(rule_file 1000) ]]
   cleanup_all_locked
-  [[ ! -e $(rule_file 1000) && ! -e $test_tmp/etc/sudoers.d/99-omarchy-nopasswd-Alice ]]
-  [[ -e $test_tmp/etc/sudoers.d/99-omarchy-nopasswd-custom && -e $test_tmp/etc/sudoers.d/99-omarchy-nopasswd-handwritten ]]
-  ! compgen -G "$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-buildbot*"
-  rm "$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-custom" "$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-handwritten"
+  ! compgen -G "$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-*"
+  [[ $(stat -c '%a' "$quarantine") == 700 ]]
+  [[ $(quarantined_policy '99-omarchy-nopasswd-ali\0143e') == 'alice ALL=(ALL) NOPASSWD: ALL' ]]
+  [[ $(quarantined_policy "99-omarchy-nopasswd-$long_suffix") == 'alice ALL=(ALL) NOPASSWD: ALL' ]]
+  [[ $(quarantined_policy 99-omarchy-nopasswd-custom) == 'admin ALL=(ALL) NOPASSWD: /usr/bin/true' ]]
+  (( $(ls -A "$quarantine" | wc -l) == 3 ))
 )
-pass "legacy cleanup removes generated orphan rules for any account and preserves custom policy"
+pass "legacy cleanup removes generated rules for any account and quarantines everything else in the prefix"
 
 # Run the actual migration queue for separate temporary homes. Sudo only calls
 # the mapped helper and can be refused without requesting host authorization.
@@ -36,13 +55,18 @@ run_migrations() {
 marker="$test_tmp/var/lib/omarchy/migrations/1788163635"
 (
   source "$library"
+  # A quarantine that cannot be trusted keeps the migration pending.
+  printf 'alice ALL=(ALL) NOPASSWD: ALL\n' >"$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-mismatch"
+  TEST_BAD_PATH="$test_tmp/var/lib/omarchy" assert_status 1 run_migrations first
+  [[ ! -e $marker && -e $test_tmp/etc/sudoers.d/99-omarchy-nopasswd-mismatch ]]
   printf 'audituser ALL=(ALL) NOPASSWD: ALL\n' >"$(rule_file 1000)"
   printf 'Alice ALL=(ALL) NOPASSWD: ALL\n' >"$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-Alice"
   TEST_DELETE_FAIL=1 assert_status 1 run_migrations first
   [[ ! -e $marker && ! -e $test_tmp/first/1788163636.sh ]]
   run_migrations first
   [[ -f $marker && -f $test_tmp/first/1788163636.sh ]]
-  [[ ! -e $test_tmp/etc/sudoers.d/99-omarchy-nopasswd-Alice ]]
+  ! compgen -G "$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-*"
+  [[ $(quarantined_policy 99-omarchy-nopasswd-mismatch) == 'alice ALL=(ALL) NOPASSWD: ALL' ]]
   enable_locked 1000 15
   cp "$(rule_file 1000)" "$test_tmp/renewed"
   : >"$test_tmp/commands"
