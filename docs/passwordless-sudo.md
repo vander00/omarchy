@@ -10,7 +10,7 @@ An internal status result is `0` for an active, validated grant and `3` for conf
 
 Calendar timers clean up expired files; their liveness does not define authorization. Callbacks read the current rule and remove it only when expired. Earlier callbacks cannot shorten a renewed grant, so no timer identity needs to be persisted. Old UID-only and token-bearing callbacks remain accepted. Pending callbacks after renewal or manual disable are harmless and expire within the maximum 24-hour grant window. Boot-time tmpfiles cleanup removes the reserved generated filename namespace before users log in; routine non-boot tmpfiles maintenance leaves live grants alone.
 
-Legacy cleanup uses a root-owned machine marker under `/var/lib/omarchy/migrations/`, written only after successful cleanup under the grant lock. Later accounts can finish their migration queues without sudo and without revoking grants created after the repair. Old grant state files are no longer consulted; generated legacy policy is removed conservatively and administrator-modified policy is preserved by the migration.
+Legacy cleanup uses a root-owned machine marker under `/var/lib/omarchy/migrations/`, written only after successful cleanup under the grant lock. Later accounts can finish their migration queues without sudo and without revoking grants created after the repair. Old grant state files are no longer consulted. A legacy grant is recognized by its exact filename and rule relationship, since the old command wrote the caller's unvalidated name into both, so accounts outside the current name policy are still cleaned up; administrator-modified policy under the owned prefix is preserved by the migration.
 
 ## Package ownership
 

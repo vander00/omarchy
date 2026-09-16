@@ -9,7 +9,8 @@ source "$SHELL_TEST_DIR/fixtures/passwordless-sudo-test.sh"
   for minutes in 1 15 1440 00015; do valid_minutes "$minutes" || exit 1; done
   for minutes in 0 1441 -1 1m '' 18446744073709551617; do ! valid_minutes "$minutes" || exit 1; done
   for name in audituser 'buildbot$'; do valid_account_name "$name" || exit 1; done
-  for name in 'a$b' '$' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; do ! valid_account_name "$name" || exit 1; done
+  # Upper-case words are sudoers alias references, so ALICE must never publish.
+  for name in 'a$b' '$' 'a b' 'a#b' Alice ALICE ALL aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; do ! valid_account_name "$name" || exit 1; done
   ! valid_uid 18446744073709551617
 )
 pass "duration and account validation retains bounded inputs and trailing-dollar usernames"
@@ -159,5 +160,7 @@ cp "$ROOT/default/libalpm/hooks/05-omarchy-passwordless-revoke.hook" "$test_tmp/
   /usr/sbin/visudo -cf "$(rule_file 1000)" >/dev/null
   cleanup_uid_locked 1000
   [[ ! -e $(rule_file 1000) ]]
+  TEST_ACCOUNT=ALICE assert_status 1 enable_locked 1000 15
+  [[ ! -e $(rule_file 1000) ]]
 )
-pass "trailing-dollar accounts publish and revoke valid native policy"
+pass "trailing-dollar accounts publish valid native policy and alias-shaped names never publish"

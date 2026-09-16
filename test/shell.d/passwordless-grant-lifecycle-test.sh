@@ -8,14 +8,20 @@ source "$SHELL_TEST_DIR/fixtures/passwordless-sudo-test.sh"
   source "$library"
   printf 'deleteduser ALL=(ALL) NOPASSWD: ALL\n' >"$(rule_file 1000)"
   printf 'buildbot$ ALL=(ALL) NOPASSWD: ALL\n' >"$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-buildbot$"
+  # The legacy command never validated the account name, so a manual or NSS
+  # account outside the current policy still has its exact old grant removed.
+  printf 'Alice ALL=(ALL) NOPASSWD: ALL\n' >"$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-Alice"
   printf 'admin ALL=(ALL) NOPASSWD: /usr/bin/true\n' >"$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-custom"
+  printf 'Alice ALL=(ALL) NOPASSWD: ALL\n' >"$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-handwritten"
   TEST_DELETE_FAIL=1 assert_status 1 cleanup_all_locked
   [[ -e $(rule_file 1000) ]]
   cleanup_all_locked
-  [[ ! -e $(rule_file 1000) && -e $test_tmp/etc/sudoers.d/99-omarchy-nopasswd-custom ]]
+  [[ ! -e $(rule_file 1000) && ! -e $test_tmp/etc/sudoers.d/99-omarchy-nopasswd-Alice ]]
+  [[ -e $test_tmp/etc/sudoers.d/99-omarchy-nopasswd-custom && -e $test_tmp/etc/sudoers.d/99-omarchy-nopasswd-handwritten ]]
   ! compgen -G "$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-buildbot*"
+  rm "$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-custom" "$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-handwritten"
 )
-pass "legacy cleanup removes generated orphan rules and preserves custom policy"
+pass "legacy cleanup removes generated orphan rules for any account and preserves custom policy"
 
 # Run the actual migration queue for separate temporary homes. Sudo only calls
 # the mapped helper and can be refused without requesting host authorization.
@@ -31,10 +37,12 @@ marker="$test_tmp/var/lib/omarchy/migrations/1788163635"
 (
   source "$library"
   printf 'audituser ALL=(ALL) NOPASSWD: ALL\n' >"$(rule_file 1000)"
+  printf 'Alice ALL=(ALL) NOPASSWD: ALL\n' >"$test_tmp/etc/sudoers.d/99-omarchy-nopasswd-Alice"
   TEST_DELETE_FAIL=1 assert_status 1 run_migrations first
   [[ ! -e $marker && ! -e $test_tmp/first/1788163636.sh ]]
   run_migrations first
   [[ -f $marker && -f $test_tmp/first/1788163636.sh ]]
+  [[ ! -e $test_tmp/etc/sudoers.d/99-omarchy-nopasswd-Alice ]]
   enable_locked 1000 15
   cp "$(rule_file 1000)" "$test_tmp/renewed"
   : >"$test_tmp/commands"
