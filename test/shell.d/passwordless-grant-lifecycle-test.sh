@@ -115,9 +115,49 @@ for name in omarchy-settings omarchy-settings-dev; do
     enable_locked 1000 15
     pre_upgrade && post_upgrade
     [[ ! -e $(rule_file 1000) && ! -e $REMOVAL_BLOCKER ]]
+    # pacman does not stop a transaction on a failed scriptlet, so a failed
+    # pre_upgrade can be followed directly by post_upgrade. Completion must
+    # not clear the blocker while a rule remains, and a clean retry recovers.
+    enable_locked 1000 15
+    TEST_DELETE_FAIL=1 assert_status 1 pre_upgrade
+    TEST_DELETE_FAIL=1 assert_status 1 post_upgrade
+    [[ -e $REMOVAL_BLOCKER && -e $(rule_file 1000) ]]
+    assert_status 1 enable_locked 1000 15
+    post_upgrade
+    [[ ! -e $(rule_file 1000) && ! -e $REMOVAL_BLOCKER ]]
+    # A stranded blocker plus a live rule from an interrupted removal is
+    # cleaned by the next completed installation, not merely unblocked.
+    enable_locked 1000 15
+    : >"$REMOVAL_BLOCKER"
+    post_install
+    [[ ! -e $(rule_file 1000) && ! -e $REMOVAL_BLOCKER ]]
+    # A fresh install has no earlier step, so completion must hold the blocker
+    # itself while it sweeps: a leftover rule it cannot remove leaves
+    # publication refused rather than merely reporting an error.
+    enable_locked 1000 15
+    rm -f "$REMOVAL_BLOCKER"
+    TEST_DELETE_FAIL=1 assert_status 1 post_install
+    [[ -e $REMOVAL_BLOCKER && -e $(rule_file 1000) ]]
+    assert_status 1 enable_locked 1000 15
+    post_install
+    [[ ! -e $(rule_file 1000) && ! -e $REMOVAL_BLOCKER ]]
+    # The sweep must not depend on the glob state pacman's shell inherits.
+    enable_locked 1000 15
+    ( set -f; GLOBIGNORE='*' post_upgrade )
+    [[ ! -e $(rule_file 1000) && ! -e $REMOVAL_BLOCKER ]]
+    # A failure before the lock is even taken, such as an untrusted lock
+    # directory, must still leave publication refused.
+    enable_locked 1000 15
+    rm -f "$REMOVAL_BLOCKER"
+    TEST_BAD_PATH="$test_tmp/run/lock" assert_status 1 post_install
+    [[ -e $REMOVAL_BLOCKER && -e $(rule_file 1000) ]]
+    TEST_BAD_PATH="$test_tmp/run/lock" assert_status 1 pre_upgrade
+    [[ -e $REMOVAL_BLOCKER ]]
+    post_install
+    [[ ! -e $(rule_file 1000) && ! -e $REMOVAL_BLOCKER ]]
   )
 done
-pass "both settings packages revoke grants, block publication, and recover on installation"
+pass "both settings packages revoke grants, block publication, and recover on installation only with the namespace empty"
 
 reset_grant
 # Hold the source lock, then start package removal. A native flock on the
@@ -148,13 +188,21 @@ done
 /usr/bin/bash -euo pipefail -c 'source "$1"; pre_remove; post_remove' bash "$test_tmp/omarchy-settings.install" >"$test_tmp/removal.log" 2>&1 &
 removal=$!
 children+=("$removal")
+# The removal announces itself before waiting for the lock, so a publisher
+# still holding it is refused rather than allowed to publish a rule that the
+# removal would delete a moment later.
+for (( attempt=0; attempt<200; attempt++ )); do
+  [[ ! -f $test_tmp/run/omarchy-sudo-passwordless-package-removing ]] || break
+  sleep 0.01
+done
+[[ -f $test_tmp/run/omarchy-sudo-passwordless-package-removing ]] || fail "removal did not announce itself before waiting for the lock"
 touch "$test_tmp/release"
-wait "$publisher" || fail "publisher failed" "$(cat "$test_tmp/publisher.log")"
+if wait "$publisher"; then fail "publisher was allowed to publish after removal announced itself" "$(cat "$test_tmp/publisher.log")"; fi
 wait "$removal" || fail "removal failed" "$(cat "$test_tmp/removal.log")"
 children=()
 [[ ! -e $test_tmp/etc/sudoers.d/99-omarchy-nopasswd-1000 ]]
 [[ -f $test_tmp/run/omarchy-sudo-passwordless-package-removing ]]
-pass "native lock serializes grant publication with package removal"
+pass "an announced package removal refuses a waiting publisher and clears the namespace"
 
 # systemd-tmpfiles operates on an explicit disposable root, never the host.
 reset_grant
