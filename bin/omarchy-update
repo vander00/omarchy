@@ -20,8 +20,10 @@ omarchy_security_require_source_root "$0"
 # Preserve the caller's path only for the later unprivileged hook/mise phases.
 user_path=${OMARCHY_UPDATE_USER_PATH:-$PATH}
 unset OMARCHY_UPDATE_USER_PATH
-omarchy_security_revoke_sudo_timestamp || exit 1
+# Traps first, so a signal or failure during the entry revocation still
+# exits through the cleanup path.
 omarchy_security_install_sudo_cleanup_traps
+omarchy_security_revoke_sudo_timestamp || exit 1
 omarchy_security_enable_no_update_sudo
 
 update_stay_awake_stopped=0
