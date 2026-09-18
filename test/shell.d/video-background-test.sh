@@ -88,6 +88,15 @@ assert(
 )
 assert(backgroundQml.includes('BackgroundMedia {') && lockQml.includes('BackgroundMedia {'), 'desktop and lock screen share video-capable media rendering')
 assert(
+  backgroundQml.includes('property bool oweActive: false') &&
+    backgroundQml.includes('/owe/owed.sock') &&
+    /deferVideo: root\.oweActive/.test(backgroundQml) &&
+    /property bool deferVideo: false/.test(mediaQml) &&
+    /active: root\.path !== "" && root\.video && !root\.reloading && !root\.deferVideo/.test(mediaQml) &&
+    !lockQml.includes('deferVideo'),
+  'the desktop yields video backgrounds to OWE while it is running, and the lock keeps its own playback'
+)
+assert(
   lockQml.includes('source: wallpaper.video ? null : wallpaper') &&
     lockQml.includes('visible: !wallpaper.video') &&
     lockQml.includes('visible: wallpaper.video'),

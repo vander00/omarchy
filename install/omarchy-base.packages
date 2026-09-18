@@ -107,6 +107,8 @@ python-poetry-core
 ttfx
 qemu-user-static-binfmt
 qrencode
+# TODO: add owe-wallpaper-engine here once it is packaged. The shell yields
+# video backgrounds to it while its daemon runs.
 qt6-imageformats
 qt6-multimedia
 qt6-multimedia-ffmpeg

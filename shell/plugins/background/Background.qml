@@ -32,6 +32,25 @@ Item {
   // services so playback can stop whenever nothing can see the wallpaper.
   property var shell: null
 
+  // When the OWE wallpaper engine is running, it owns video backgrounds. This
+  // plugin keeps stills, which OWE hands back to it, and the lock screen keeps
+  // its own playback.
+  property bool oweActive: false
+
+  Process {
+    id: oweStatusProc
+    command: ["bash", "-c", "test -S \"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/owe/owed.sock\""]
+    onExited: root.oweActive = (exitCode === 0)
+  }
+
+  Timer {
+    id: oweStatusTimer
+    interval: 5000
+    repeat: true
+    running: true
+    onTriggered: if (!oweStatusProc.running) oweStatusProc.running = true
+  }
+
   // Stop a video wallpaper's decoding whenever it is covered. Qt's FFmpeg
   // engine drives its own clock, so an unseen player keeps decoding until it
   // is told not to — a locked laptop would otherwise decode until it died.
@@ -204,7 +223,10 @@ Item {
     }
   }
 
-  Component.onCompleted: refreshBackground()
+  Component.onCompleted: {
+    oweStatusProc.running = true
+    refreshBackground()
+  }
 
   Variants {
     model: Quickshell.screens
@@ -264,6 +286,7 @@ Item {
         anchors.fill: parent
         path: root.displayedBackground
         reloads: root.displayedReloads
+        deferVideo: root.oweActive
         playbackEnabled: !root.sessionObscured && !root.powerSaverActive && !panel.fullscreenHere
         audioEnabled: panel.firstScreen
         onReadyChanged: {
