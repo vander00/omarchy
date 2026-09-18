@@ -1,5 +1,4 @@
 import Quickshell
-import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
 import QtQuick
@@ -27,43 +26,6 @@ Item {
   property string pendingColorsRaw: ""
   property string pendingShellRaw: ""
   property real revealProgress: 1
-
-  // Injected by the first-party service loader; used to reach the lock and idle
-  // services so playback can stop whenever nothing can see the wallpaper.
-  property var shell: null
-
-  // When the OWE wallpaper engine is running, it owns video backgrounds. This
-  // plugin keeps stills, which OWE hands back to it, and the lock screen keeps
-  // its own playback. The desktop video path and its pause policy stay as the
-  // fallback for systems without OWE.
-  property bool oweActive: false
-
-  Process {
-    id: oweStatusProc
-    command: ["bash", "-c", "test -S \"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/owe/owed.sock\""]
-    onExited: root.oweActive = (exitCode === 0)
-  }
-
-  Timer {
-    id: oweStatusTimer
-    interval: 5000
-    repeat: true
-    running: true
-    onTriggered: if (!oweStatusProc.running) oweStatusProc.running = true
-  }
-
-  // Stop a video wallpaper's decoding whenever it is covered. Qt's FFmpeg
-  // engine drives its own clock, so an unseen player keeps decoding until it
-  // is told not to — a locked laptop would otherwise decode until it died.
-  readonly property var lockService: shell && shell.services ? shell.firstPartyServiceFor("omarchy.lock") : null
-  readonly property var idleService: shell && shell.services ? shell.firstPartyServiceFor("omarchy.idle") : null
-  readonly property var batteryService: shell && shell.services ? shell.firstPartyServiceFor("omarchy.battery") : null
-  readonly property bool lockActive: lockService ? lockService.locked : false
-  readonly property bool screensaverActive: idleService ? idleService.screensaverWindowCount > 0 : false
-  readonly property bool powerSaverActive: batteryService ? batteryService.powerSaverOnBattery : false
-  // A lock or a screensaver covers every output, so it is decided once here.
-  // Fullscreen is decided per output below, because it only covers its own.
-  readonly property bool sessionObscured: lockActive || screensaverActive
 
   function isVideo(path) {
     return Util.isVideoPath(path)
@@ -252,19 +214,6 @@ Item {
       // by pausing playback rather than by parking the layer.
       updatesEnabled: true
 
-      // Pausing every wallpaper for one fullscreen window would freeze the one
-      // still on show next to it, which costs a viewer more than it saves. The
-      // workspace on show here knows whether a fullscreen window covers it,
-      // wherever focus happens to be.
-      readonly property var hyprlandMonitor: Hyprland.monitorFor(modelData)
-      readonly property var visibleWorkspace: hyprlandMonitor ? hyprlandMonitor.activeWorkspace : null
-      readonly property bool fullscreenHere: visibleWorkspace ? visibleWorkspace.hasFullscreen : false
-
-      // A sound track plays from one output only, or every monitor would
-      // layer its own copy of it.
-      readonly property bool firstScreen: Quickshell.screens.length > 0
-        && String(Quickshell.screens[0].name || "") === String(modelData.name || "")
-
       property bool maskReady: false
 
       function maybeStartReveal() {
@@ -282,14 +231,14 @@ Item {
       WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
       exclusionMode: ExclusionMode.Ignore
 
+      // OWE owns video backgrounds. This layer draws stills, and stays empty
+      // behind a video so OWE's own layer shows through.
       BackgroundMedia {
         id: base
         anchors.fill: parent
         path: root.displayedBackground
         reloads: root.displayedReloads
-        deferVideo: root.oweActive
-        playbackEnabled: !root.sessionObscured && !root.powerSaverActive && !panel.fullscreenHere
-        audioEnabled: panel.firstScreen
+        videoEnabled: false
         onReadyChanged: {
           if (ready && root.finishingTransition) {
             root.incomingBackground = ""

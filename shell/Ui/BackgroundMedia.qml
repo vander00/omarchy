@@ -7,11 +7,9 @@ Item {
   property string path: ""
   property int version: 0
   property bool playbackEnabled: true
-  property bool audioEnabled: false
-  // The desktop yields video playback to OWE while it runs, so two engines
-  // never decode the same file. The lock screen leaves this off and keeps its
-  // own playback.
-  property bool deferVideo: false
+  // The desktop turns this off because OWE owns video backgrounds. The lock
+  // screen leaves it on and keeps its own playback.
+  property bool videoEnabled: true
   // Bumped when the file behind an unchanged path may have been replaced.
   // Images cache-bust through version; a video is rebuilt, since FFmpeg
   // would read a query as part of the filename.
@@ -27,7 +25,7 @@ Item {
   // Both test the path directly: going through `video` lets a URL evaluate
   // against the stale flag and leak the wrong file for one pass.
   readonly property url imageUrl: path && !Util.isVideoPath(path) ? Util.fileUrl(path) + (version ? "?v=" + version : "") : ""
-  readonly property url videoUrl: path && Util.isVideoPath(path) ? Util.fileUrl(path) : ""
+  readonly property url videoUrl: path && Util.isVideoPath(path) && videoEnabled ? Util.fileUrl(path) : ""
 
   Loader {
     id: imageLoader
@@ -41,7 +39,7 @@ Item {
   Loader {
     id: videoLoader
     anchors.fill: parent
-    active: root.path !== "" && root.video && !root.reloading && !root.deferVideo
+    active: root.path !== "" && root.video && !root.reloading && root.videoEnabled
     source: "BackgroundVideo.qml"
   }
 
@@ -65,13 +63,6 @@ Item {
     target: videoLoader.item
     property: "playbackEnabled"
     value: root.playbackEnabled
-    when: videoLoader.item !== null
-  }
-
-  Binding {
-    target: videoLoader.item
-    property: "audioEnabled"
-    value: root.audioEnabled
     when: videoLoader.item !== null
   }
 

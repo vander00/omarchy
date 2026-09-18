@@ -33,7 +33,7 @@ assert(
     videoQml.includes('autoPlay: root.playbackEnabled') &&
     videoQml.includes('fillMode: VideoOutput.PreserveAspectCrop') &&
     /imageUrl: path && !Util\.isVideoPath\(path\) \? Util\.fileUrl\(path\) \+ \(version \? "\?v=" \+ version : ""\) : ""/.test(mediaQml) &&
-    /videoUrl: path && Util\.isVideoPath\(path\) \? Util\.fileUrl\(path\) : ""/.test(mediaQml),
+    /videoUrl: path && Util\.isVideoPath\(path\) && videoEnabled \? Util\.fileUrl\(path\) : ""/.test(mediaQml),
   'background media plays aspect-cropped videos on a loop, and hands each loader only its own kind of file'
 )
 assert(
@@ -62,16 +62,12 @@ assert(
 )
 assert(
   !/^\s*Video\s*\{/m.test(videoQml) &&
-    /property bool audioEnabled: false/.test(videoQml) &&
-    /property bool audioEnabled: false/.test(mediaQml) &&
-    /active: root\.audioEnabled && player\.hasAudio/.test(videoQml) &&
-    /audioOutput: audioLoader\.item/.test(videoQml) &&
-    /muted: root\.priming \|\| !root\.playbackEnabled/.test(videoQml) &&
-    /property: "audioEnabled"\s*\n\s*value: root\.audioEnabled/.test(mediaQml) &&
-    /firstScreen: Quickshell\.screens\.length > 0\s*\n\s*&& String\(Quickshell\.screens\[0\]\.name/.test(backgroundQml) &&
-    backgroundQml.includes('audioEnabled: panel.firstScreen') &&
+    !videoQml.includes('AudioOutput {') &&
+    !videoQml.includes('audioOutput:') &&
+    !mediaQml.includes('audioEnabled') &&
+    !backgroundQml.includes('audioEnabled') &&
     !lockQml.includes('audioEnabled'),
-  'a sound track plays from the first monitor only, a silent file builds no audio output, and the lock stays quiet'
+  'playback is silent everywhere, so no audio output or audio client is built'
 )
 assert(
   /property: "mediaSource"[\s\S]*?when: videoLoader\.item !== null && Util\.isVideoPath\(root\.path\)\s*\n\s*restoreMode: Binding\.RestoreNone/.test(mediaQml) &&
@@ -88,33 +84,26 @@ assert(
 )
 assert(backgroundQml.includes('BackgroundMedia {') && lockQml.includes('BackgroundMedia {'), 'desktop and lock screen share video-capable media rendering')
 assert(
-  backgroundQml.includes('property bool oweActive: false') &&
-    backgroundQml.includes('/owe/owed.sock') &&
-    /deferVideo: root\.oweActive/.test(backgroundQml) &&
-    /property bool deferVideo: false/.test(mediaQml) &&
-    /active: root\.path !== "" && root\.video && !root\.reloading && !root\.deferVideo/.test(mediaQml) &&
-    !lockQml.includes('deferVideo'),
-  'the desktop yields video backgrounds to OWE while it is running, and the lock keeps its own playback'
+  backgroundQml.includes('videoEnabled: false') &&
+    /property bool videoEnabled: true/.test(mediaQml) &&
+    /active: root\.path !== "" && root\.video && !root\.reloading && root\.videoEnabled/.test(mediaQml) &&
+    !lockQml.includes('videoEnabled'),
+  'the desktop hands video backgrounds to OWE, and the lock keeps its own playback'
+)
+assert(
+  !backgroundQml.includes('playbackEnabled') &&
+    !backgroundQml.includes('sessionObscured') &&
+    !backgroundQml.includes('fullscreenHere') &&
+    !backgroundQml.includes('Hyprland.monitorFor') &&
+    !backgroundQml.includes('omarchy.lock') &&
+    !backgroundQml.includes('omarchy.battery'),
+  'the desktop no longer carries the shell video pause policy'
 )
 assert(
   lockQml.includes('source: wallpaper.video ? null : wallpaper') &&
     lockQml.includes('visible: !wallpaper.video') &&
     lockQml.includes('visible: wallpaper.video'),
   'lock screen bypasses its image effect for video output'
-)
-assert(
-  /sessionObscured:\s*lockActive \|\| screensaverActive/.test(backgroundQml) &&
-    backgroundQml.includes('playbackEnabled: !root.sessionObscured && !root.powerSaverActive && !panel.fullscreenHere') &&
-    backgroundQml.includes('omarchy.lock') &&
-    backgroundQml.includes('omarchy.idle') &&
-    backgroundQml.includes('omarchy.battery'),
-  'desktop playback stops while covered or on battery power-saver'
-)
-assert(
-  backgroundQml.includes('Hyprland.monitorFor(modelData)') &&
-    /fullscreenHere: visibleWorkspace \? visibleWorkspace\.hasFullscreen : false/.test(backgroundQml) &&
-    !backgroundQml.includes('ToplevelManager.activeToplevel'),
-  'a fullscreen window pauses only the output it covers, wherever focus is'
 )
 assert(
   /if \(displayedBackground === finalPath\) displayedReloads \+= 1/.test(backgroundQml) &&
