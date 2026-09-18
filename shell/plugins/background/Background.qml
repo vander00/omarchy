@@ -16,7 +16,6 @@ Item {
 
   property string currentBackground: ""
   property string displayedBackground: ""
-  property int displayedReloads: 0
   property string incomingBackground: ""
   property string oldBackground: ""
   property bool finishingTransition: false
@@ -60,9 +59,6 @@ Item {
     if (instant || !displayedBackground || isVideo(path) || isVideo(displayedBackground)) {
       oldBackground = ""
       incomingBackground = ""
-      // A theme switch can replace the file behind an unchanged path, which
-      // an unchanged property would never pick up.
-      if (displayedBackground === finalPath) displayedReloads += 1
       displayedBackground = finalPath
       revealProgress = 1
       return
@@ -187,7 +183,6 @@ Item {
   }
 
   Component.onCompleted: {
-    oweStatusProc.running = true
     refreshBackground()
   }
 
@@ -237,8 +232,6 @@ Item {
         id: base
         anchors.fill: parent
         path: root.displayedBackground
-        reloads: root.displayedReloads
-        videoEnabled: false
         onReadyChanged: {
           if (ready && root.finishingTransition) {
             root.incomingBackground = ""

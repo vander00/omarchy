@@ -107,12 +107,10 @@ python-poetry-core
 ttfx
 qemu-user-static-binfmt
 qrencode
-# TODO: add owe here once omarchy-pkgs#519 lands. The shell keeps stills and
-# the lock screen, and OWE owns desktop video backgrounds. Version 0.1.1 or
-# newer plays the video's audio.
+# OWE owns desktop video backgrounds and feeds the lock screen its frames.
+owe
+owe-lockfeed
 qt6-imageformats
-qt6-multimedia
-qt6-multimedia-ffmpeg
 quickshell
 ripgrep
 ruby
