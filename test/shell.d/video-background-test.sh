@@ -67,7 +67,7 @@ assert(
     !mediaQml.includes('audioEnabled') &&
     !backgroundQml.includes('audioEnabled') &&
     !lockQml.includes('audioEnabled'),
-  'playback is silent everywhere, so no audio output or audio client is built'
+  'the shell builds no audio output: OWE plays the desktop video audio and the lock stays silent'
 )
 assert(
   /property: "mediaSource"[\s\S]*?when: videoLoader\.item !== null && Util\.isVideoPath\(root\.path\)\s*\n\s*restoreMode: Binding\.RestoreNone/.test(mediaQml) &&
