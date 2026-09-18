@@ -107,8 +107,9 @@ python-poetry-core
 ttfx
 qemu-user-static-binfmt
 qrencode
-# TODO: add owe-wallpaper-engine here once it is packaged. The shell keeps
-# stills and the lock screen, and OWE owns desktop video backgrounds.
+# TODO: add owe here once omarchy-pkgs#519 lands. The shell keeps stills and
+# the lock screen, and OWE owns desktop video backgrounds. Version 0.1.1 or
+# newer plays the video's audio.
 qt6-imageformats
 qt6-multimedia
 qt6-multimedia-ffmpeg
