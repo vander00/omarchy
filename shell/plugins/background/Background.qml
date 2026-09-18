@@ -34,7 +34,8 @@ Item {
 
   // When the OWE wallpaper engine is running, it owns video backgrounds. This
   // plugin keeps stills, which OWE hands back to it, and the lock screen keeps
-  // its own playback.
+  // its own playback. The desktop video path and its pause policy stay as the
+  // fallback for systems without OWE.
   property bool oweActive: false
 
   Process {
