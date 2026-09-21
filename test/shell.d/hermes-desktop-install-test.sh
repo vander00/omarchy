@@ -53,20 +53,39 @@ chmod 4755 "$test_tmp/package/chrome-sandbox"
 cat >"$test_tmp/share/install.sh" <<'MOCK'
 #!/bin/bash
 set -e
-printf 'bootstrap\n' >>"$OMARCHY_TEST_ROOT/events"
 printf '%s\n' "$@" >"$OMARCHY_TEST_ROOT/install-args"
 [[ ${OMARCHY_TEST_INSTALL_FAIL:-0} != 1 ]] || exit 7
 commit=$OMARCHY_TEST_RELEASE_COMMIT
 force=false
+stage=""
 while (( $# )); do
   case "$1" in
     --dir) runtime=$2; shift ;;
     --commit) commit=$2; shift ;;
     --force-commit) force=true ;;
+    --stage) stage=$2; shift ;;
     --hermes-home) [[ $2 == "$HERMES_HOME" ]] ;;
   esac
   shift
 done
+# The commands upstream writes last: shims for the two side commands and, for
+# hermes, a launcher into the runtime's venv the way the real one is written.
+write_commands() {
+  mkdir -p "$HOME/.local/bin"
+  for command in hermes hermes-agent hermes-acp; do
+    rm -f "$HOME/.local/bin/$command"
+    printf 'native runtime shim\n' >"$HOME/.local/bin/$command"
+  done
+  printf '#!/bin/bash\nexec "%s/venv/bin/hermes" "$@"\n' "$runtime" >"$HOME/.local/bin/hermes"
+  chmod +x "$HOME/.local/bin/hermes"
+}
+# The path stage writes the commands alone, without touching the checkout.
+if [[ $stage == "path" ]]; then
+  printf 'path\n' >>"$OMARCHY_TEST_ROOT/events"
+  write_commands
+  exit 0
+fi
+printf 'bootstrap\n' >>"$OMARCHY_TEST_ROOT/events"
 mkdir -p -- "${runtime%/*}"
 if [[ ! -d $runtime ]]; then
   git clone -q --depth 1 "file://$OMARCHY_TEST_ROOT/seed" "$runtime"
@@ -80,32 +99,37 @@ if [[ $force == true ]] || ! git -C "$runtime" merge-base --is-ancestor "$commit
 fi
 mkdir -p "$runtime/venv/bin"
 git -C "$runtime" rev-parse HEAD >"$runtime/venv/dependency-commit"
-printf '#!/bin/bash\nexit 0\n' >"$runtime/venv/bin/hermes"
+# The venv command answers the readiness probes the way the real one does: the
+# installer runs the command it leaves on PATH before calling Hermes ready.
+cat >"$runtime/venv/bin/hermes" <<'SH'
+#!/bin/bash
+if [[ ${1:-} == "chat" && ${2:-} == "--help" ]]; then
+  echo "[-q QUERY, --query QUERY] [--tui]"
+else
+  echo "hermes-agent 0.0.0-test"
+fi
+SH
 chmod +x "$runtime/venv/bin/hermes"
 printf '#!/bin/bash\nexec /usr/bin/python3 "$@"\n' >"$runtime/venv/bin/python"
 chmod +x "$runtime/venv/bin/python"
 [[ ${OMARCHY_TEST_NO_MARKER:-0} == 1 ]] || touch "$runtime/.hermes-bootstrap-complete"
-mkdir -p "$HOME/.local/bin"
-for command in hermes hermes-agent hermes-acp; do
-  rm -f "$HOME/.local/bin/$command"
-  printf 'native runtime shim\n' >"$HOME/.local/bin/$command"
-done
+write_commands
 MOCK
 
 cat >"$test_tmp/bin/omarchy-pkg-add" <<'MOCK'
 #!/bin/bash
 printf 'package %s\n' "$*" >>"$OMARCHY_TEST_ROOT/events"
-[[ ${OMARCHY_TEST_PACKAGE_FAIL:-0} != 1 ]]
+[[ ${OMARCHY_TEST_PACKAGE_FAIL:-0} != 1 ]] || exit 1
+touch "$OMARCHY_TEST_ROOT/package-installed"
+MOCK
+cat >"$test_tmp/bin/omarchy-pkg-present" <<'MOCK'
+#!/bin/bash
+[[ -e $OMARCHY_TEST_ROOT/package-installed ]]
 MOCK
 cat >"$test_tmp/bin/git" <<'MOCK'
 #!/bin/bash
 if [[ ${OMARCHY_TEST_FETCH_FAIL:-0} == 1 && " $* " == *" --unshallow "* ]]; then exit 8; fi
 exec /usr/bin/git "$@"
-MOCK
-cat >"$test_tmp/bin/omarchy-install-hermes-cli" <<'MOCK'
-#!/bin/bash
-printf 'handoff\n' >>"$OMARCHY_TEST_ROOT/events"
-exit 1
 MOCK
 cat >"$test_tmp/bin/setsid" <<'MOCK'
 #!/bin/bash
@@ -149,28 +173,28 @@ MOCK
 cat >"$test_tmp/bin/systemd-run" <<'MOCK'
 #!/bin/bash
 printf 'theme-start\n' >>"$OMARCHY_TEST_ROOT/events"
-# Join the mock asynchronous launch so every test owns its full lifetime.
-for (( attempt=0; attempt<100; attempt++ )); do
-  if grep -q '^launch' "$OMARCHY_TEST_ROOT/events"; then exit 0; fi
-  sleep 0.01
-done
-exit 1
 MOCK
 chmod +x "$test_tmp/bin/"*
 
-# Substitute only system package paths in a scratch copy of the actual script.
-python3 - "$ROOT/bin/omarchy-install-ai-hermes" "$test_tmp" <<'PY'
+# Substitute only system package paths in scratch copies of the actual scripts.
+# The runtime setup lives in omarchy-install-hermes-cli, which the desktop
+# installer finds on PATH under its own name.
+python3 - "$ROOT/bin" "$test_tmp" <<'PY'
 from pathlib import Path
 import sys
 source, scratch = Path(sys.argv[1]), Path(sys.argv[2])
-script = source.read_text()
-for original, replacement in {
+substitutions = {
     '/opt/hermes-desktop': str(scratch / 'package'),
     '/usr/share/hermes-desktop': str(scratch / 'share'),
     '/usr/bin/hermes-desktop': str(scratch / 'bin/hermes-desktop'),
-}.items():
-    script = script.replace(original, replacement)
-(scratch / 'installer').write_text(script)
+}
+for name, target in (('omarchy-install-ai-hermes', scratch / 'installer'),
+                     ('omarchy-install-hermes-cli', scratch / 'bin/omarchy-install-hermes-cli')):
+    script = (source / name).read_text()
+    for original, replacement in substitutions.items():
+        script = script.replace(original, replacement)
+    target.write_text(script)
+    target.chmod(0o755)
 PY
 
 new_home() {
@@ -179,11 +203,24 @@ new_home() {
   runtime="$hermes_home/hermes-agent"
   native="$runtime/apps/desktop/release/linux-unpacked"
   mkdir -p "$test_home"
+  rm -f "$test_tmp/package-installed"
   : >"$test_tmp/events"
 }
+# The app opens in the background, so a run that got that far is joined to it
+# before anything is asserted; one that stopped earlier started nothing.
 run_installer() {
-  HOME="$test_home" HERMES_HOME="${OMARCHY_TEST_HOME:-$hermes_home}" PATH="$test_tmp/bin:$PATH" \
-    bash "$test_tmp/installer" >"$test_tmp/output" 2>&1
+  HOME="$test_home" HERMES_HOME="${OMARCHY_TEST_HOME:-$hermes_home}" PATH="$test_tmp/bin:$test_home/.local/bin:$PATH" \
+    bash "$test_tmp/installer" >"$test_tmp/output" 2>&1 || return
+  for (( attempt=0; attempt<200; attempt++ )); do
+    if grep -q '^launch' "$test_tmp/events"; then return 0; fi
+    sleep 0.01
+  done
+  return 1
+}
+# ~/.local/bin is on PATH the way Omarchy puts it there, after the mocks.
+run_cli() {
+  HOME="$test_home" HERMES_HOME="${OMARCHY_TEST_HOME:-$hermes_home}" PATH="$test_tmp/bin:$test_home/.local/bin:$PATH" \
+    bash "$test_tmp/bin/omarchy-install-hermes-cli" "$@" >"$test_tmp/output" 2>&1
 }
 assert_stopped() {
   if grep -Eq '^(launch|theme-|build-stamp)' "$test_tmp/events"; then fail "$1"; fi
@@ -193,9 +230,10 @@ new_home fresh
 run_installer || fail "fresh setup succeeds" "$(cat "$test_tmp/output")"
 expected=$(printf '%s\n' --skip-setup --branch main --commit "$release_commit" --force-commit --dir "$runtime" --hermes-home "$hermes_home")
 [[ $(cat "$test_tmp/install-args") == "$expected" ]] || fail "upstream installer receives the pinned main arguments"
-[[ $(head -3 "$test_tmp/events") == $'package hermes-desktop\nhandoff\nbootstrap' ]] || fail "package and CLI handoff precede runtime bootstrap"
-grep -qx launch "$test_tmp/events" || fail "native app is copied before launch"
-[[ $(sed -n '4p' "$test_tmp/events") == build-stamp ]] || fail "upstream build stamp follows the app copy and precedes launch"
+[[ $(head -2 "$test_tmp/events") == $'package hermes-desktop\nbootstrap' ]] || fail "the package precedes runtime bootstrap" "$(cat "$test_tmp/events")"
+[[ $(sed -n '3p' "$test_tmp/events") == build-stamp ]] || fail "upstream build stamp follows the app copy" "$(cat "$test_tmp/events")"
+[[ $(tail -1 "$test_tmp/events") == launch ]] || fail "the app opens only once setup and the theme hand-over are in place" "$(cat "$test_tmp/events")"
+grep -qx theme-start "$test_tmp/events" || fail "setup hands Hermes the theme"
 [[ $(cat "$hermes_home/desktop-build-stamp.json") == 'upstream build stamp' ]] || fail "the upstream helper records the completed packaged build"
 [[ $(cat "$runtime/runtime.txt") == after ]] || fail "the release runtime receives its patch"
 [[ $(stat -c %a "$native/chrome-sandbox") == 755 ]] || fail "the user sandbox is not setuid"
@@ -284,8 +322,10 @@ run_installer && fail "incomplete existing app requires repair"
 assert_stopped "incomplete native app prevents launch"
 pass "an incomplete existing native app is preserved"
 
+# A runtime already at the release, edited where the patch lands, before Omarchy
+# has prepared it: the conflict is reported and nothing is touched.
 new_home patch-conflict
-run_installer || fail "patch conflict fixture sets up"
+HOME="$test_home" HERMES_HOME="$hermes_home" bash "$test_tmp/share/install.sh" --dir "$runtime" --hermes-home "$hermes_home"
 printf 'local edit\n' >"$runtime/runtime.txt"
 : >"$test_tmp/events"
 run_installer && fail "unexpected patch conflict stops setup"
@@ -297,6 +337,17 @@ run_installer && fail "incomplete modified runtime cannot be reset by upstream i
 ! grep -qx bootstrap "$test_tmp/events" || fail "modified runtime never reaches upstream installer"
 pass "patch conflicts and incomplete modified runtimes retain local changes and stop safely"
 
+# Once set up, a runtime is the user's to edit; a finished install is not
+# re-patched or re-verified, only opened.
+new_home finished-edit
+run_installer || fail "finished-edit fixture sets up" "$(cat "$test_tmp/output")"
+printf 'local edit\n' >"$runtime/runtime.txt"
+: >"$test_tmp/events"
+run_installer || fail "a finished install with local edits is accepted" "$(cat "$test_tmp/output")"
+[[ $(cat "$runtime/runtime.txt") == 'local edit' ]] || fail "local edits to a finished runtime are preserved"
+[[ $(cat "$test_tmp/events") == $'package hermes-desktop\nlaunch' ]] || fail "a finished install is only opened" "$(cat "$test_tmp/events")"
+pass "a finished install is left as the user has it"
+
 new_home full-history-retry
 git clone -q "$test_tmp/seed" "$runtime"
 git -C "$runtime" checkout -q --detach "$release_commit"
@@ -305,6 +356,10 @@ run_installer || fail "clean incomplete full-history release checkout is repaire
 [[ $(git -C "$runtime" rev-parse HEAD) == "$release_commit" && -f $native/resources/app.asar ]] || fail "full-history retry seeds the matching release"
 pass "full-history retries force the guarded release pin before dependency setup"
 
+# A main that is neither the release nor origin/main is kept under another name
+# and main still starts at the release: a user's own commits stay reachable,
+# and a clone whose main is off origin/main only because upstream rewrote its
+# history is not refused for work it never did.
 new_home local-main
 git clone -q "$test_tmp/seed" "$runtime"
 printf 'local branch work\n' >"$runtime/keep"
@@ -312,10 +367,70 @@ git -C "$runtime" add keep
 git -C "$runtime" -c user.name=Test -c user.email=test@example.invalid commit -qm local-work
 local_main=$(git -C "$runtime" rev-parse main)
 git -C "$runtime" checkout -q --detach "$release_commit"
-run_installer && fail "local main commits cannot be reset by upstream installation"
-! grep -qx bootstrap "$test_tmp/events" || fail "local main is checked before upstream installer"
-[[ $(git -C "$runtime" rev-parse main) == "$local_main" ]] || fail "local main commit stays referenced"
-pass "detached release checkouts do not hide local main work from the installer guard"
+run_installer || fail "a runtime whose main carries other work still sets up" "$(cat "$test_tmp/output")"
+[[ $(git -C "$runtime" rev-parse main) == "$release_commit" ]] || fail "main starts at the release"
+kept=$(git -C "$runtime" for-each-ref --format='%(objectname)' 'refs/heads/main-before-omarchy-*')
+[[ $kept == "$local_main" ]] || fail "what main pointed at is kept under another name" "$kept"
+grep -q 'main-before-omarchy-' "$test_tmp/output" || fail "the kept branch is named in the output"
+[[ -f $native/resources/app.asar ]] || fail "setup carries on to seed the app"
+pass "work on main is kept under another name rather than refused"
+
+# A shallow.lock nothing has touched for a minute is what a probe that killed
+# Hermes mid-fetch leaves behind; it must not stop the history fetch for good.
+new_home stale-lock
+HOME="$test_home" HERMES_HOME="$hermes_home" bash "$test_tmp/share/install.sh" --dir "$runtime" --hermes-home "$hermes_home"
+printf 'stale\n' >"$runtime/.git/shallow.lock"
+touch -d '5 minutes ago' "$runtime/.git/shallow.lock"
+run_installer || fail "a stale shallow.lock does not stop setup" "$(cat "$test_tmp/output")"
+[[ ! -e $runtime/.git/shallow.lock ]] || fail "the stale lock is cleared"
+[[ $(git -C "$runtime" rev-parse --is-shallow-repository) == false ]] || fail "the history fetch went ahead after the stale lock"
+pass "a stale shallow.lock is cleared rather than left to block every history fetch"
+
+# The same old lock with a git still working in the runtime is somebody's: it
+# is waited for, not taken. Each way a live git is found gets its own run: a
+# stand-in git that lives until this test releases it, only after setup has
+# said it is waiting, and that says if its lock was stolen while it lived; it
+# then leaves the lock behind orphaned the way a killed fetch would.
+live_lock_case() {
+  local name=$1 where=$2 output_line='Waiting for Hermes' attempt
+  shift 2
+  new_home "$name"
+  ln -s "$test_home" "$test_tmp/$name-link"
+  HOME="$test_home" HERMES_HOME="$hermes_home" bash "$test_tmp/share/install.sh" --dir "$runtime" --hermes-home "$hermes_home"
+  printf 'live\n' >"$runtime/.git/shallow.lock"
+  touch -d '5 minutes ago' "$runtime/.git/shallow.lock"
+  rm -f "$test_tmp/lock-stolen" "$test_tmp/release-git"
+  (cd "$where" && { if (( $# )); then export "$@"; fi; } && export LOCK="$runtime/.git/shallow.lock" && exec -a git bash -c 'for (( i = 0; i < 900; i++ )); do [[ -e "$1" ]] && exit; [[ -e $LOCK ]] || { touch "$2"; exit; }; sleep 0.1; done' _ "$test_tmp/release-git" "$test_tmp/lock-stolen") &
+  fake_git=$!
+  : >"$test_tmp/output"
+  # The runtime is reached through a link, as a symlinked home would, since
+  # /proc reports canonical paths and the runtime path keeps links.
+  OMARCHY_TEST_HOME="$test_tmp/$name-link/.hermes" run_installer &
+  installer=$!
+  for (( attempt = 0; attempt < 300; attempt++ )); do
+    grep -q "$output_line" "$test_tmp/output" 2>/dev/null && break
+    sleep 0.1
+  done
+  if ! grep -q "$output_line" "$test_tmp/output"; then
+    touch "$test_tmp/release-git"; wait "$installer" || true
+    fail "setup says it is waiting for the live git ($name)" "$(cat "$test_tmp/output")"
+  fi
+  [[ ! -e $test_tmp/lock-stolen ]] || fail "the lock was cleared while a git still worked in the runtime ($name)"
+  touch "$test_tmp/release-git"
+  wait "$installer" || fail "setup goes ahead once the git is gone ($name)" "$(cat "$test_tmp/output")"
+  wait "$fake_git" 2>/dev/null || true
+  [[ ! -e $test_tmp/lock-stolen ]] || fail "the lock was cleared while a git still worked in the runtime ($name)"
+  [[ ! -e $runtime/.git/shallow.lock ]] || fail "the orphaned lock is cleared once nothing holds it ($name)"
+  [[ $(git -C "$runtime" rev-parse --is-shallow-repository) == false ]] || fail "the history fetch went ahead after the wait ($name)"
+}
+# Found by its working directory.
+live_lock_case live-lock-cwd "$test_tmp/live-lock-cwd/.hermes/hermes-agent"
+pass "a lock a live git holds is waited for, not taken, through a linked runtime path"
+# Found by GIT_DIR alone, with a trailing slash, from elsewhere, with a large
+# environment: read whole and NUL-delimited, or it would go unseen.
+big_env=$(head -c 120000 /dev/zero | tr '\0' 'x')
+live_lock_case live-lock-env "$test_tmp" BIG_ENV="$big_env" GIT_DIR="$test_tmp/live-lock-env/.hermes/hermes-agent/.git/"
+pass "a git working from elsewhere with GIT_DIR naming the runtime is found by its environment"
 
 new_home deepen-retry
 OMARCHY_TEST_FETCH_FAIL=1 run_installer && fail "history fetch failure stops setup"
@@ -345,10 +460,88 @@ new_home old-package
 mv "$test_tmp/package/resources/install-stamp.json" "$test_tmp/saved-install-stamp.json"
 run_installer && fail "an old installed package cannot bootstrap"
 grep -q 'omarchy update' "$test_tmp/output" || fail "old package has actionable upgrade guidance"
-! grep -qx handoff "$test_tmp/events" || fail "old package is rejected before CLI handoff"
 ! grep -qx bootstrap "$test_tmp/events" || fail "old package never reaches upstream installer"
 mv "$test_tmp/saved-install-stamp.json" "$test_tmp/package/resources/install-stamp.json"
-pass "old package fails with upgrade guidance before changing the runtime or CLI"
+pass "old package fails with upgrade guidance before changing the runtime"
+
+# Choosing Hermes as the default agent runs the same setup, short of opening
+# the app: the package, the runtime, the seeded app and the theme hand-over.
+new_home terminal-agent
+run_cli --now || fail "the default agent path sets Hermes up" "$(cat "$test_tmp/output")"
+[[ $(cat "$test_tmp/events") == $'package hermes-desktop\nbootstrap\nbuild-stamp\ntheme-stop\ntheme-start' ]] ||
+  fail "the default agent path installs the app's runtime without opening the app" "$(cat "$test_tmp/events")"
+[[ -x $test_home/.local/bin/hermes && -f $native/resources/app.asar ]] || fail "the default agent path leaves the command and the seeded app in place"
+: >"$test_tmp/events"
+run_cli --now || fail "a finished install is accepted by the default agent path" "$(cat "$test_tmp/output")"
+[[ ! -s $test_tmp/events ]] || fail "a finished install is set up again" "$(cat "$test_tmp/events")"
+run_cli --check || fail "--check follows the installed runtime"
+pass "choosing Hermes as the default agent installs the app's runtime without opening the app"
+
+# A Hermes the user set up themselves is what the default agent runs, and
+# nothing is installed beside it. Asked for the app by name, Omarchy installs
+# the package first, and then the runtime supersedes it with the command saved.
+new_home own-hermes
+mkdir -p "$test_home/.local/bin"
+cat >"$test_home/.local/bin/hermes" <<'SH'
+#!/bin/bash
+if [[ ${1:-} == "chat" && ${2:-} == "--help" ]]; then
+  echo "[-q QUERY, --query QUERY] [--tui]"
+else
+  echo "hermes-agent 0.0.0-user"
+fi
+SH
+chmod +x "$test_home/.local/bin/hermes"
+own_hermes=$(cat "$test_home/.local/bin/hermes")
+run_cli --now || fail "the default agent path accepts the user's own Hermes" "$(cat "$test_tmp/output")"
+[[ ! -s $test_tmp/events ]] || fail "a working Hermes of the user's own has the app installed beside it" "$(cat "$test_tmp/events")"
+[[ $(cat "$test_home/.local/bin/hermes") == "$own_hermes" ]] || fail "the user's own hermes command is left alone"
+run_installer || fail "the app installs over the user's own Hermes" "$(cat "$test_tmp/output")"
+grep -qx bootstrap "$test_tmp/events" || fail "the app sets up its own runtime"
+backups=("$test_home/.local/bin/".hermes-before-desktop.*)
+[[ ${#backups[@]} == 1 && $(cat "${backups[0]}/hermes") == "$own_hermes" ]] || fail "the user's own hermes command is saved aside"
+pass "the default agent path stands aside for the user's own Hermes; the app supersedes it"
+
+# A finished runtime whose command is gone, or not its own, gets its command
+# back from upstream's path stage alone: no bootstrap, the runtime untouched,
+# and what held the name saved aside. Until then --check says no, so the menu
+# opens a terminal for the repair rather than running the agent on the wrong
+# Hermes.
+new_home command-repair
+run_cli --now || fail "command-repair fixture sets up" "$(cat "$test_tmp/output")"
+rm "$test_home/.local/bin/hermes"
+run_cli --check && fail "--check calls a runtime installed without its command"
+: >"$test_tmp/events"
+run_cli --now || fail "a missing command is restored" "$(cat "$test_tmp/output")"
+[[ $(cat "$test_tmp/events") == path ]] || fail "a missing command is restored without bootstrapping again" "$(cat "$test_tmp/events")"
+run_cli --check || fail "--check follows the restored command"
+printf '%s\n' "#!/bin/bash" "exec /usr/local/bin/somebody-elses-hermes \"\$@\"" >"$test_home/.local/bin/hermes"
+chmod +x "$test_home/.local/bin/hermes"
+run_cli --check && fail "--check calls the app installed while the terminal is on another Hermes"
+: >"$test_tmp/events"
+run_cli --now || fail "a foreign command beside the app's runtime is replaced" "$(cat "$test_tmp/output")"
+[[ $(cat "$test_tmp/events") == path ]] || fail "a foreign command is replaced without bootstrapping again" "$(cat "$test_tmp/events")"
+grep -lF somebody-elses-hermes "$test_home/.local/bin/".hermes-before-desktop.*/hermes >/dev/null 2>&1 || fail "the foreign command is saved aside"
+grep -qF "$hermes_home/" "$test_home/.local/bin/hermes" || fail "the runtime's own command is back"
+run_cli --check || fail "--check follows the runtime's own command"
+chmod -x "$test_home/.local/bin/hermes"
+run_cli --check && fail "--check calls the runtime's own command installed when it cannot run"
+: >"$test_tmp/events"
+run_cli --now || fail "the runtime's own command is rewritten when it cannot run" "$(cat "$test_tmp/output")"
+[[ $(cat "$test_tmp/events") == path && -x $test_home/.local/bin/hermes ]] || fail "a command that cannot run is rewritten by the path stage alone" "$(cat "$test_tmp/events")"
+pass "a finished runtime gets its own command back without bootstrapping again"
+
+# A hermes ahead of ~/.local/bin on PATH is what the default agent would run,
+# so a finished install behind it is not installed, and --now names it rather
+# than setting anything up again.
+cp "$test_home/.local/bin/hermes" "$test_tmp/bin/hermes"
+run_cli --check && fail "--check calls a shadowed install installed"
+: >"$test_tmp/events"
+run_cli --now && fail "--now reports a shadowed install as ready"
+grep -qF "$test_tmp/bin/hermes" "$test_tmp/output" || fail "--now names the command in the way" "$(cat "$test_tmp/output")"
+[[ ! -s $test_tmp/events ]] || fail "a shadowed install is set up again" "$(cat "$test_tmp/events")"
+rm -f "$test_tmp/bin/hermes"
+run_cli --check || fail "--check follows the install once nothing shadows it"
+pass "a hermes ahead of ~/.local/bin on PATH is reported, not set up over"
 
 new_home custom-profile
 hermes_home="$test_home/custom home"
