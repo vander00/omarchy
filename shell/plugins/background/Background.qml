@@ -182,9 +182,7 @@ Item {
     }
   }
 
-  Component.onCompleted: {
-    refreshBackground()
-  }
+  Component.onCompleted: refreshBackground()
 
   Variants {
     model: Quickshell.screens
@@ -205,8 +203,7 @@ Item {
       // Keep render updates enabled. The background layer has been observed to
       // lose its committed buffer while parked with updatesEnabled=false,
       // leaving a black desktop until omarchy-shell is restarted. A still
-      // wallpaper costs nothing to keep enabled, and a video one is throttled
-      // by pausing playback rather than by parking the layer.
+      // wallpaper costs nothing to keep enabled. OWE manages video layers.
       updatesEnabled: true
 
       property bool maskReady: false

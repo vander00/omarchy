@@ -7,6 +7,7 @@ Item {
   id: root
 
   property string backgroundPath: ""
+  property string videoPosterPath: ""
   property int backgroundVersion: 0
   property bool fingerprintConfigured: false
   property bool authenticatingPassword: false
@@ -91,40 +92,32 @@ Item {
 
     BackgroundMedia {
       id: wallpaper
+      objectName: "lockWallpaper"
       anchors.fill: parent
-      path: root.video ? "" : root.backgroundPath
+      path: root.loadBackground ? (root.video ? root.videoPosterPath : root.backgroundPath) : ""
       version: root.backgroundVersion
-      visible: !root.video
-    }
-
-    // OWE decodes the video once and feeds these frames to every lock surface.
-    // The feed pauses when this output blanks or on battery power saver.
-    Loader {
-      id: feedLoader
-      anchors.fill: parent
-      active: root.video
-      source: "LockFeedSurface.qml"
-      visible: status === Loader.Ready
-
-      Binding {
-        target: feedLoader.item
-        property: "feedEnabled"
-        value: root.feedActive
-        when: feedLoader.item !== null
-        restoreMode: Binding.RestoreNone
-      }
     }
 
     MultiEffect {
       anchors.fill: wallpaper
-      source: root.video ? null : wallpaper
-      visible: !root.video
+      source: wallpaper
       autoPaddingEnabled: false
       blurEnabled: root.loadBackground && wallpaper.ready
       blur: 1.0
       blurMax: 128
       blurMultiplier: 1.25
       contrast: -0.08
+    }
+
+    // The cached poster stays behind the feed when policy pauses playback,
+    // the module is unavailable, or a new connection has not received a frame.
+    Loader {
+      id: feedLoader
+      objectName: "lockFeedLoader"
+      anchors.fill: parent
+      active: root.feedActive
+      source: "LockFeedSurface.qml"
+      visible: status === Loader.Ready
     }
 
     // The feed item cannot be sampled by MultiEffect on every renderer.

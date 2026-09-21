@@ -95,6 +95,9 @@ omacalc
 omacut
 omawrite
 omarchy-nvim
+# OWE owns desktop video backgrounds and feeds the lock screen its frames.
+owe
+owe-lockfeed
 pacman-contrib
 pamixer
 pinta
@@ -107,9 +110,6 @@ python-poetry-core
 ttfx
 qemu-user-static-binfmt
 qrencode
-# OWE owns desktop video backgrounds and feeds the lock screen its frames.
-owe
-owe-lockfeed
 qt6-imageformats
 quickshell
 ripgrep

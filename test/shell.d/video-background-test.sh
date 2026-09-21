@@ -49,11 +49,9 @@ assert(
 assert(
   /^import Owe\.LockFeed$/m.test(lockFeedQml) &&
     lockFeedQml.includes('LockFeed {') &&
-    lockFeedQml.includes('active: root.feedEnabled') &&
     lockQml.includes('source: "LockFeedSurface.qml"') &&
-    lockQml.includes('active: root.video') &&
-    /feedActive: root\.video && root\.loadBackground && !root\.displaysBlank && !root\.powerSaverActive/.test(lockQml) &&
-    /property: "feedEnabled"[\s\S]*?value: root\.feedActive/.test(lockQml),
+    lockQml.includes('active: root.feedActive') &&
+    /feedActive: root\.video && root\.loadBackground && !root\.displaysBlank && !root\.powerSaverActive/.test(lockQml),
   'the lock screen shows video through the OWE lock feed, loaded so a missing module costs only the video'
 )
 assert(
@@ -61,8 +59,8 @@ assert(
   'the lock view itself carries no foreign import, so the lock still loads without the feed module'
 )
 assert(
-  lockQml.includes('path: root.video ? "" : root.backgroundPath') &&
-    lockQml.includes('visible: !root.video') &&
+  lockQml.includes('path: root.loadBackground ? (root.video ? root.videoPosterPath : root.backgroundPath) : ""') &&
+    lockQml.indexOf('id: feedLoader') > lockQml.indexOf('MultiEffect {') &&
     lockQml.includes('visible: root.video') &&
     !lockQml.includes('wallpaper.video'),
   'the lock screen keeps its image effect for stills and shows the feed for videos'
