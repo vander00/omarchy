@@ -7,10 +7,12 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
+export QR_ROUTE_EXIT=0
 
 # Loopback is never wireless, so exercise the connected-Wi-Fi fallback.
 cat >"$tmp/bin/ip" <<'EOF'
 #!/bin/bash
+[[ $QR_ROUTE_EXIT == "0" ]] || exit "$QR_ROUTE_EXIT"
 printf '1.1.1.1 dev lo\n'
 EOF
 
@@ -91,6 +93,12 @@ run_success_case \
   "network QR helper detects the Wi-Fi interface" \
   $'Cafe Detected\nwpa-psk\nsecret\nno\n' \
   'WIFI:T:WPA;S:Cafe Detected;P:secret;;' \
+  --meta
+
+QR_ROUTE_EXIT=2 run_success_case \
+  "network QR helper detects Wi-Fi when route lookup fails" \
+  $'Cafe No Route\nwpa-psk\nsecret\nno\n' \
+  'WIFI:T:WPA;S:Cafe No Route;P:secret;;' \
   --meta
 
 run_success_case \
