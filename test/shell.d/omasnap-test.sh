@@ -9,7 +9,8 @@ migration="$ROOT/migrations/1788129995.sh"
 
 grep -qxF omasnap "$packages" || fail "fresh installs include Omasnap"
 ! grep -qxF tensaku "$packages" || fail "fresh installs no longer include Tensaku"
-pass "fresh installs use Omasnap as the screenshot editor"
+! grep -qxF satty "$packages" || fail "fresh installs no longer include Satty"
+pass "fresh installs use Omasnap as the screenshot tool"
 
 grep -Fq 'namespace = "^omasnap$"' "$ROOT/default/hypr/apps/screenshot-selection.lua" ||
   fail "Omasnap has a layer rule"
@@ -63,6 +64,7 @@ pass "the Omarchy screenshot route delegates compatible arguments to Omasnap"
 cat >"$stub_bin/omarchy-pkg-add" <<'SH'
 #!/bin/bash
 printf 'add\t%s\n' "$*" >>"$OMASNAP_MIGRATION_LOG"
+exit "${OMASNAP_PACKAGE_STATUS:-0}"
 SH
 cat >"$stub_bin/omarchy-pkg-drop" <<'SH'
 #!/bin/bash
@@ -82,11 +84,16 @@ EOF
 ln -s "$migration_home/dotfiles/imv.config" "$migration_home/.config/imv/config"
 
 migration_log="$test_tmp/migration.log"
-OMASNAP_MIGRATION_LOG="$migration_log" HOME="$migration_home" PATH="$stub_bin:$PATH" \
-  bash -euo pipefail "$migration" >/dev/null
+run_migration() {
+  : >"$migration_log"
+  OMASNAP_MIGRATION_LOG="$migration_log" HOME="$migration_home" PATH="$stub_bin:$PATH" \
+    bash -euo pipefail "$migration" >/dev/null
+}
+
+run_migration
 
 [[ $(sed -n '1p' "$migration_log") == $'add\tomasnap' ]] || fail "the migration installs Omasnap first"
-[[ $(sed -n '2p' "$migration_log") == $'drop\ttensaku' ]] || fail "the migration removes Tensaku after Omasnap is ready"
+[[ $(sed -n '2p' "$migration_log") == $'drop\tsatty tensaku' ]] || fail "the migration removes Satty and Tensaku after Omasnap is ready"
 grep -Fq '# Edit the current image in Omasnap and quit the viewer' "$migration_home/.config/imv/config" ||
   fail "the migration updates the stock imv editor comment"
 grep -Fq '<Ctrl+e> = exec omasnap "$imv_current_file" & ; quit' "$migration_home/.config/imv/config" ||
@@ -97,3 +104,51 @@ grep -Fq '<Ctrl+x> = exec custom-editor "$imv_current_file" & ; quit' "$migratio
 [[ $(stat -c '%a' "$migration") == 644 ]] || fail "the Omasnap migration has mode 0644"
 
 pass "the migration swaps packages and safely updates only the stock imv binding"
+
+cat >"$migration_home/dotfiles/imv.config" <<'EOF'
+[binds]
+
+# Edit the current image in Satty and quit the viewer
+<Ctrl+e> = exec satty --filename "$imv_current_file" & ; quit
+<Ctrl+x> = exec custom-editor "$imv_current_file" & ; quit
+EOF
+cp "$migration_home/dotfiles/imv.config" "$test_tmp/imv-before"
+legacy_desktop="$migration_home/.local/share/applications/omasnap.desktop"
+mkdir -p "$(dirname "$legacy_desktop")"
+cat >"$legacy_desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Omasnap
+Exec=omasnap
+NoDisplay=true
+EOF
+if OMASNAP_PACKAGE_STATUS=1 run_migration; then
+  fail "Omasnap install failure stops the migration"
+fi
+[[ $(<"$migration_log") == $'add\tomasnap' ]] || fail "install failure leaves old screenshot packages installed"
+cmp -s "$test_tmp/imv-before" "$migration_home/dotfiles/imv.config" || fail "install failure leaves the imv binding untouched"
+[[ -f $legacy_desktop ]] || fail "install failure preserves the existing launcher entry"
+pass "Omasnap install failure preserves the previous screenshot setup"
+
+run_migration
+[[ ! -e $legacy_desktop && ! -L $legacy_desktop ]] || fail "the migration removes the old user-local Omasnap desktop entry"
+pass "the migration removes the desktop entry that hides the packaged launcher"
+grep -Fq '# Edit the current image in Omasnap and quit the viewer' "$migration_home/.config/imv/config" ||
+  fail "the migration updates the stock Satty comment"
+grep -Fq '<Ctrl+e> = exec omasnap "$imv_current_file" & ; quit' "$migration_home/.config/imv/config" ||
+  fail "the migration replaces the stock Satty binding before removing Satty"
+grep -Fq '<Ctrl+x> = exec custom-editor "$imv_current_file" & ; quit' "$migration_home/.config/imv/config" ||
+  fail "the Satty migration preserves custom bindings"
+[[ -L $migration_home/.config/imv/config ]] || fail "the Satty migration preserves the imv symlink"
+pass "the migration upgrades the stock Satty binding to Omasnap"
+
+cp "$migration_home/dotfiles/imv.config" "$test_tmp/imv-migrated"
+run_migration
+cmp -s "$test_tmp/imv-migrated" "$migration_home/dotfiles/imv.config" || fail "rerunning the migration preserves the updated imv config"
+pass "the migration can be rerun"
+
+printf '<Ctrl+e> = exec custom-editor "$imv_current_file" & ; quit\n' >"$migration_home/dotfiles/imv.config"
+cp "$migration_home/dotfiles/imv.config" "$test_tmp/imv-custom"
+run_migration
+cmp -s "$test_tmp/imv-custom" "$migration_home/dotfiles/imv.config" || fail "the migration preserves a custom edit shortcut"
+pass "custom imv edit shortcuts remain unchanged"
