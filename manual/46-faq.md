@@ -54,7 +54,7 @@ Automatic discovery, where printers on the network appear without being added, i
 
 ### How do I change where screenshots or screenrecordings are saved?
 
-Omasnap saves screenshots to `~/Pictures/Screenshots` by default. To use another directory, add this to a file under `~/.config/uwsm/env.d/` (like `~/.config/uwsm/env.d/capture`):
+Saved screenshots go to `~/Pictures/Screenshots` by default. To use another directory, add this to a file under `~/.config/uwsm/env.d/` (like `~/.config/uwsm/env.d/capture`):
 
 ```
 export OMASNAP_SCREENSHOT_DIR="$HOME/Pictures/Captures"

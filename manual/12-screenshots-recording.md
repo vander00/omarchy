@@ -13,13 +13,15 @@ Everything you can grab off the screen hangs off the Print Screen key. One key o
 
 ## Screenshots
 
-Hit `Print Screen` and Omasnap captures the focused monitor before its overlay appears, so nothing shifts under you while you aim. Drag a freeform region, or use the tabs across the top to switch between Region, Scrolling Region, Window, and Fullscreen capture. Changed your mind? Hit `Print Screen` again to dismiss Omasnap.
+Hit `Print Screen` and Omasnap captures the focused monitor before its overlay appears, so nothing shifts under you while you aim. Drag a freeform region, click a window to capture it, or click open space to capture the whole monitor. Press `S` before drawing to capture a scrolling region. Changed your mind? Hit `Print Screen` again to dismiss Omasnap.
 
-After you select an area, Omasnap opens its annotation editor. It can draw arrows, lines, shapes, highlights, numbered markers, text, and secure redactions; crop or cut out part of the image; OCR its text; and add a backdrop. Press `Enter` to copy and save the finished PNG, `Ctrl + C` to copy it without saving, `Ctrl + S` to save it without copying, or `P` to pin it above your windows.
+After you select an area, Omasnap copies the capture to the clipboard and shows a preview for 10 seconds. Use the preview's pin button or `Ctrl + P` to keep it on screen, or choose Edit to annotate it.
 
-Files land in `~/Pictures/Screenshots` by default, with a name such as `screenshot-2026-08-13_14-22-05-firefox.png`. Set `OMASNAP_SCREENSHOT_DIR` to use another directory — see [the FAQ](46-faq.md) for where to put session environment variables. Omasnap creates the directory when it saves the first shot.
+The annotation editor can draw arrows, lines, shapes, highlights, numbered markers, text, and secure redactions; crop or cut out part of the image; OCR its text; and add a backdrop. In the editor, press `Enter` to copy and save the finished PNG, `Ctrl + C` to copy it without saving, or `Ctrl + S` to save it without copying.
 
-From the terminal, `omarchy screenshot` opens the same overlay, and you can choose its starting mode: `omarchy capture screenshot region`, `windows`, `fullscreen`, or `scroll`. A second argument of `copy` or `save` bypasses the annotation editor and sends the shot straight to that destination.
+Saved screenshots land in `~/Pictures/Screenshots` by default, with a name such as `screenshot-2026-08-13_14-22-05-firefox.png`. Set `OMASNAP_SCREENSHOT_DIR` to use another directory — see [the FAQ](46-faq.md) for where to put session environment variables. Omasnap creates the directory when it saves the first shot.
+
+From the terminal, `omarchy screenshot` opens the same overlay, and you can choose its starting mode: `omarchy capture screenshot region`, `windows`, `fullscreen`, or `scroll`. A second argument of `copy` or `save` skips the preview and sends the shot straight to that destination. To edit before output, use `omarchy screenshot --editor=overlay` for a fullscreen editor or `omarchy screenshot --editor=window` for a separate window.
 
 ### Driving the picker from the keyboard
 
@@ -27,7 +29,6 @@ While the selection is up, you don't have to use the mouse at all:
 
 | Key | Function |
 | --- | -------- |
-| `Space` | Step through Region, Scrolling Region, and Window modes |
 | `S` | Toggle scrolling-region mode |
 | `Super + Arrow keys` | Move among windows in Window mode |
 | `Return` | Capture the highlighted window |
