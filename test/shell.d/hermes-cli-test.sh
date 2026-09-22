@@ -44,6 +44,8 @@ case "$1" in
   ls)
     if [[ ${OMARCHY_TEST_MISE_BUILT:-0} == 1 && ! -e $OMARCHY_TEST_MISE_LOG.unrequested ]]; then
       echo '{"pipx:hermes-agent[extras=all]": [{"version": "latest"}]}'
+    elif [[ ${OMARCHY_TEST_MISE_SIBLING:-0} == 1 ]]; then
+      echo '{"pipx:hermes-agent-tools": [{"version": "latest"}]}'
     else
       echo '{}'
     fi
@@ -260,6 +262,15 @@ grep -qF "mise uninstall --all pipx:hermes-agent[extras=all]" "$mise_log" || fai
 run_installer --retire-mise || fail "--retire-mise succeeds with nothing of Omarchy's"
 [[ ! -s $mise_log ]] || fail "--retire-mise asks mise about an environment nothing proves Omarchy's" "$(cat "$mise_log")"
 pass "--retire-mise removes the wrapper and the environment it built, and only with proof"
+
+# A global tool whose name merely starts the same way is not the retired one;
+# read as it, it could never be removed and the migration would stay pending.
+write_legacy_stub "$hermes"
+: >"$mise_log"
+OMARCHY_TEST_MISE_SIBLING=1 run_installer --retire-mise || fail "--retire-mise succeeds beside a tool named like the retired one" "$(cat "$test_tmp/output")"
+[[ ! -e $hermes ]] || fail "the wrapper goes when only a similarly named tool is requested"
+! grep -q '^mise rm' "$mise_log" || fail "a similarly named tool is taken for the retired one" "$(cat "$mise_log")"
+pass "a mise tool named like the retired one does not keep the migration pending"
 
 # The shim mise put ahead of ~/.local/bin is what the agent would run until
 # the environment goes; it goes with the uninstall, and so does the saved
