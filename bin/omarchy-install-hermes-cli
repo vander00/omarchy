@@ -286,7 +286,7 @@ git_dir_of() {
 git_busy_in_runtime() {
   local pid cwd dir real
   real=$(realpath -e -- "$runtime" 2>/dev/null) || return 1
-  for pid in $(pgrep -u "$(id -u)" -f '^git(-remote-[a-z]+)?( |$)' 2>/dev/null); do
+  for pid in $(pgrep -u "$(id -u)" -f '^([^ ]*/)?git(-remote-[a-z]+)?( |$)' 2>/dev/null); do
     cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null) || continue
     if [[ $cwd == "$real" || $cwd == "$real/"* ]]; then
       return 0

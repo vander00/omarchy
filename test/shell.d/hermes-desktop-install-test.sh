@@ -405,7 +405,7 @@ live_lock_case() {
   printf 'live\n' >"$runtime/.git/shallow.lock"
   touch -d '5 minutes ago' "$runtime/.git/shallow.lock"
   rm -f "$test_tmp/lock-stolen" "$test_tmp/release-git"
-  (cd "$where" && { if (( $# )); then export "$@"; fi; } && export LOCK="$runtime/.git/shallow.lock" && exec -a git bash -c 'for (( i = 0; i < 900; i++ )); do [[ -e "$1" ]] && exit; [[ -e $LOCK ]] || { touch "$2"; exit; }; sleep 0.1; done' _ "$test_tmp/release-git" "$test_tmp/lock-stolen") &
+  (cd "$where" && { if (( $# )); then export "$@"; fi; } && export LOCK="$runtime/.git/shallow.lock" && exec -a "${OMARCHY_TEST_GIT_ARGV0:-git}" bash -c 'for (( i = 0; i < 900; i++ )); do [[ -e "$1" ]] && exit; [[ -e $LOCK ]] || { touch "$2"; exit; }; sleep 0.1; done' _ "$test_tmp/release-git" "$test_tmp/lock-stolen") &
   fake_git=$!
   : >"$test_tmp/output"
   # The runtime is reached through a link, as a symlinked home would, since
@@ -436,6 +436,25 @@ pass "a lock a live git holds is waited for, not taken, through a linked runtime
 big_env=$(head -c 120000 /dev/zero | tr '\0' 'x')
 live_lock_case live-lock-env "$test_tmp" BIG_ENV="$big_env" GIT_DIR="$test_tmp/live-lock-env/.hermes/hermes-agent/.git/"
 pass "a git working from elsewhere with GIT_DIR naming the runtime is found by its environment"
+# Named by its path, as a git run as /usr/bin/git is.
+live_lock_case live-lock-path "$test_tmp/live-lock-path/.hermes/hermes-agent" OMARCHY_TEST_GIT_ARGV0=/usr/bin/git
+pass "a git that names itself by its path is found too"
+# A process that only names git on its command line, an editor opened on
+# /usr/bin/git from inside the runtime say, is not a git at work there: the
+# stale lock goes and setup carries on without waiting.
+new_home bystander
+HOME="$test_home" HERMES_HOME="$hermes_home" bash "$test_tmp/share/install.sh" --dir "$runtime" --hermes-home "$hermes_home"
+printf 'stale\n' >"$runtime/.git/shallow.lock"
+touch -d '5 minutes ago' "$runtime/.git/shallow.lock"
+rm -f "$test_tmp/release-bystander"
+(cd "$runtime" && exec -a nvim bash -c 'for (( i = 0; i < 900; i++ )); do [[ -e "$1" ]] && exit; sleep 0.1; done' _ "$test_tmp/release-bystander" /usr/bin/git) &
+bystander=$!
+run_installer || { touch "$test_tmp/release-bystander"; fail "setup goes ahead beside a process that only names git" "$(cat "$test_tmp/output")"; }
+touch "$test_tmp/release-bystander"
+wait "$bystander" 2>/dev/null || true
+! grep -q 'Waiting for Hermes' "$test_tmp/output" || fail "a process that only names git is waited for"
+[[ ! -e $runtime/.git/shallow.lock ]] || fail "the stale lock is cleared beside a process that only names git"
+pass "a process that only names git on its command line is not waited for"
 
 new_home deepen-retry
 OMARCHY_TEST_FETCH_FAIL=1 run_installer && fail "history fetch failure stops setup"
