@@ -10,5 +10,7 @@ if [[ ! $OMARCHY_PATH -ef /usr/share/omarchy && -d $packaged_plugin && ! -e $use
   ln -s "$packaged_plugin" "$user_plugin"
 fi
 
-omarchy-shell shell rescanPlugins
+# Best-effort, like the put below: an update whose shell cannot be asked still
+# finishes, and restarts the shell once the migrations are through.
+omarchy-shell -q shell rescanPlugins
 omarchy-bar put omacom.elsewhen --before omarchy.clock
