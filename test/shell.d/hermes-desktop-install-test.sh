@@ -54,6 +54,7 @@ cat >"$test_tmp/share/install.sh" <<'MOCK'
 #!/bin/bash
 set -e
 printf '%s\n' "$@" >"$OMARCHY_TEST_ROOT/install-args"
+printf '%s\n' "${npm_config_yes:-unset}" >"$OMARCHY_TEST_ROOT/install-npx-answer"
 [[ ${OMARCHY_TEST_INSTALL_FAIL:-0} != 1 ]] || exit 7
 commit=$OMARCHY_TEST_RELEASE_COMMIT
 force=false
@@ -209,7 +210,7 @@ new_home() {
 # The app opens in the background, so a run that got that far is joined to it
 # before anything is asserted; one that stopped earlier started nothing.
 run_installer() {
-  HOME="$test_home" HERMES_HOME="${OMARCHY_TEST_HOME:-$hermes_home}" PATH="$test_tmp/bin:$test_home/.local/bin:$PATH" \
+  HOME="$test_home" HERMES_HOME="${OMARCHY_TEST_HOME:-$hermes_home}" PATH="$test_tmp/bin:$test_home/.local/bin:$PATH" npm_config_yes= \
     bash "$test_tmp/installer" >"$test_tmp/output" 2>&1 || return
   for (( attempt=0; attempt<200; attempt++ )); do
     if grep -q '^launch' "$test_tmp/events"; then return 0; fi
@@ -219,7 +220,7 @@ run_installer() {
 }
 # ~/.local/bin is on PATH the way Omarchy puts it there, after the mocks.
 run_cli() {
-  HOME="$test_home" HERMES_HOME="${OMARCHY_TEST_HOME:-$hermes_home}" PATH="$test_tmp/bin:$test_home/.local/bin:$PATH" \
+  HOME="$test_home" HERMES_HOME="${OMARCHY_TEST_HOME:-$hermes_home}" PATH="$test_tmp/bin:$test_home/.local/bin:$PATH" npm_config_yes= \
     bash "$test_tmp/bin/omarchy-install-hermes-cli" "$@" >"$test_tmp/output" 2>&1
 }
 assert_stopped() {
@@ -230,6 +231,10 @@ new_home fresh
 run_installer || fail "fresh setup succeeds" "$(cat "$test_tmp/output")"
 expected=$(printf '%s\n' --skip-setup --branch main --commit "$release_commit" --force-commit --dir "$runtime" --hermes-home "$hermes_home")
 [[ $(cat "$test_tmp/install-args") == "$expected" ]] || fail "upstream installer receives the pinned main arguments"
+# npx asks before fetching a package it does not have, Playwright's included,
+# and the floating terminal the menu opens has nobody to answer. The runners
+# clear the variable, so only the installer can have set it.
+[[ $(cat "$test_tmp/install-npx-answer") == "true" ]] || fail "upstream installer runs with npx's question answered" "$(cat "$test_tmp/install-npx-answer")"
 [[ $(head -2 "$test_tmp/events") == $'package hermes-desktop\nbootstrap' ]] || fail "the package precedes runtime bootstrap" "$(cat "$test_tmp/events")"
 [[ $(sed -n '3p' "$test_tmp/events") == build-stamp ]] || fail "upstream build stamp follows the app copy" "$(cat "$test_tmp/events")"
 [[ $(tail -1 "$test_tmp/events") == launch ]] || fail "the app opens only once setup and the theme hand-over are in place" "$(cat "$test_tmp/events")"

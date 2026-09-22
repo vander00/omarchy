@@ -436,7 +436,9 @@ fi
 
 if [[ $runtime_present == "false" ]]; then
   echo "Setting up the Hermes runtime..."
-  bash /usr/share/hermes-desktop/install.sh --skip-setup --branch main --commit "$release_commit" --force-commit --dir "$runtime" --hermes-home "$HERMES_HOME"
+  # npx stops to ask before fetching Playwright for the browser tools, and in
+  # the terminal the menu opens for this nobody is there to say yes.
+  npm_config_yes=true bash /usr/share/hermes-desktop/install.sh --skip-setup --branch main --commit "$release_commit" --force-commit --dir "$runtime" --hermes-home "$HERMES_HOME"
   if ! runtime_ready; then
     echo "Hermes runtime setup did not complete. Re-run this command after resolving the installer error." >&2
     exit 1
