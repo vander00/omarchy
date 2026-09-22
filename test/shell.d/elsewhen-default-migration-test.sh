@@ -90,6 +90,16 @@ run_migration "$ROOT"
 [[ $(readlink "$plugin") == "$test_dir/custom-plugin" ]] || fail "existing symlink is preserved"
 pass "existing symlink is preserved, including a missing target"
 
+# An earlier revision, and a symlink once shipped under config/, pointed every
+# install at the package's old path.
+for tree in "$ROOT" "$test_dir/packaged"; do
+  ln -sfn "$test_dir/packaged/plugins/omacom.elsewhen" "$plugin"
+  run_migration "$tree"
+  [[ $(readlink "$plugin") == "$test_dir/packaged/shell/plugins/omacom.elsewhen" ]] ||
+    fail "a stranded link to the package's old path is re-pointed (OMARCHY_PATH=$tree)" "$(readlink "$plugin")"
+done
+pass "a stranded link to the package's old path is re-pointed on every install"
+rm "$plugin"
 
 if env TEST_PUT_RESULT=unknown HOME="$test_dir/home" OMARCHY_PATH="$ROOT" PATH="$test_dir/bin:$ROOT/bin:$PATH" \
   bash -euo pipefail "$test_dir/migration.sh" >"$test_dir/output" 2>&1; then
