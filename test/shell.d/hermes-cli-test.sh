@@ -126,47 +126,15 @@ run_installer --check && fail "--check reports a link to the retired wrapper as 
 rm -f "$hermes"
 pass "--check never runs the retired mise wrapper"
 
+# Hermes is only ever installed through the app: a hermes that works but did
+# not come from it is not the app's, so --check says no and --now installs the
+# app over it, the command saved aside by the runtime setup further on.
 write_hermes
-run_installer --check || fail "--check follows a hermes that runs and takes seeded sessions"
-pass "--check is true for a working hermes"
-
-# The flags have to be defined by the help, not merely mentioned in it, and
-# both of them: omarchy-agent passes --query to seed the session and --tui to
-# keep it interactive.
-OMARCHY_TEST_HERMES_HELP='Run with --tui for a terminal session; see --query in the docs.' run_installer --check &&
-  fail "--check accepts flags that are only mentioned"
-OMARCHY_TEST_HERMES_HELP='[--tui]' run_installer --check && fail "--check accepts a hermes without --query"
-OMARCHY_TEST_HERMES_HELP='[-q QUERY, --query QUERY]' run_installer --check && fail "--check accepts a hermes without --tui"
-pass "--check needs both flags defined, not mentioned"
-
-chmod -x "$hermes"
-run_installer --check && fail "--check accepts a hermes that is not executable"
-rm -f "$hermes"
-mkdir "$hermes"
-run_installer --check && fail "--check accepts a directory at the command's path"
-rmdir "$hermes"
-ln -s "$test_tmp/nowhere" "$hermes"
-run_installer --check && fail "--check accepts a dangling link"
-rm -f "$hermes"
-pass "--check rejects what is not a command that runs"
-
-# A hermes the user set up themselves is what the default agent will run, so
-# --now installs nothing beside it.
-write_hermes
-before=$(cat "$hermes")
+run_installer --check && fail "--check calls a hermes without the app installed"
 : >"$pkg_log"
-run_installer --now || fail "--now succeeds over a working hermes of the user's own" "$(cat "$test_tmp/output")"
-[[ $(cat "$hermes") == "$before" ]] || fail "--now leaves the user's hermes as it was"
-[[ ! -s $pkg_log ]] || fail "--now installs a package beside a working hermes"
-pass "--now leaves a working hermes of the user's own alone"
-
-# One that runs but predates seeded sessions is theirs to update, not ours to
-# replace with the app.
-: >"$pkg_log"
-OMARCHY_TEST_HERMES_HELP='[--tui]' run_installer --now && fail "--now replaces a hermes that predates seeded sessions"
-grep -q 'Update it' "$test_tmp/output" || fail "an old hermes gets update guidance" "$(cat "$test_tmp/output")"
-[[ ! -s $pkg_log ]] || fail "an old hermes has a package installed over it"
-pass "--now tells the user to update a hermes that predates seeded sessions"
+run_installer --now && fail "--now carries on past the mocked package failure"
+grep -qx 'hermes-desktop' "$pkg_log" || fail "--now installs the app over a hermes from elsewhere" "$(cat "$test_tmp/output")"
+pass "a hermes that did not come from the app is not the app's; choosing Hermes installs the app"
 
 rm -f "$hermes"
 : >"$pkg_log"
@@ -210,6 +178,27 @@ write_hermes ours
 OMARCHY_TEST_DESKTOP_INSTALLED=1 run_installer --check || fail "--check follows the runtime's own command"
 pass "--check needs the app's own command once the app is installed"
 
+# The flags have to be defined by the help, not merely mentioned in it, and
+# both of them: omarchy-agent passes --query to seed the session and --tui to
+# keep it interactive.
+OMARCHY_TEST_DESKTOP_INSTALLED=1 OMARCHY_TEST_HERMES_HELP='Run with --tui for a terminal session; see --query in the docs.' run_installer --check &&
+  fail "--check accepts flags that are only mentioned"
+OMARCHY_TEST_DESKTOP_INSTALLED=1 OMARCHY_TEST_HERMES_HELP='[--tui]' run_installer --check && fail "--check accepts a hermes without --query"
+OMARCHY_TEST_DESKTOP_INSTALLED=1 OMARCHY_TEST_HERMES_HELP='[-q QUERY, --query QUERY]' run_installer --check && fail "--check accepts a hermes without --tui"
+pass "--check needs both flags defined, not mentioned"
+
+chmod -x "$hermes"
+OMARCHY_TEST_DESKTOP_INSTALLED=1 run_installer --check && fail "--check accepts a hermes that is not executable"
+rm -f "$hermes"
+mkdir "$hermes"
+OMARCHY_TEST_DESKTOP_INSTALLED=1 run_installer --check && fail "--check accepts a directory at the command's path"
+rmdir "$hermes"
+ln -s "$test_tmp/nowhere" "$hermes"
+OMARCHY_TEST_DESKTOP_INSTALLED=1 run_installer --check && fail "--check accepts a dangling link"
+rm -f "$hermes"
+write_hermes ours
+pass "--check rejects what is not a command that runs"
+
 # Installed and finished: nothing to do, and quickly, because choosing the
 # agent from the menu runs this.
 : >"$pkg_log"
@@ -238,15 +227,9 @@ pass "--check does not need ~/.local/bin on the caller's PATH"
 # one the agent gets.
 cp "$hermes" "$mock_bin/hermes"
 OMARCHY_TEST_DESKTOP_INSTALLED=1 run_installer --check && fail "--check calls a shadowed command installed"
-rm -rf "$test_home/.hermes" "$test_home/.local/bin/.hermes-before-desktop."*
-run_installer --check && fail "--check calls a shadowed command of the user's own installed"
-: >"$pkg_log"
-run_installer --now && fail "--now reports a shadowed command as ready"
-grep -qF "$mock_bin/hermes" "$test_tmp/output" || fail "--now names the command in the way" "$(cat "$test_tmp/output")"
-[[ ! -s $pkg_log ]] || fail "a shadowed command has the app installed over it"
 rm -f "$mock_bin/hermes"
-run_installer --check || fail "--check follows the command once nothing shadows it"
-pass "a hermes ahead of ~/.local/bin on PATH is reported, not installed over"
+OMARCHY_TEST_DESKTOP_INSTALLED=1 run_installer --check || fail "--check follows the command once nothing shadows it"
+pass "a hermes ahead of ~/.local/bin on PATH is not the one the agent gets"
 
 # The retired wrapper's environment goes with the wrapper's proof, wherever
 # that is. --retire-mise is the migration's whole job; --now does the same once
@@ -272,20 +255,5 @@ OMARCHY_TEST_MISE_SIBLING=1 run_installer --retire-mise || fail "--retire-mise s
 ! grep -q '^mise rm' "$mise_log" || fail "a similarly named tool is taken for the retired one" "$(cat "$mise_log")"
 pass "a mise tool named like the retired one does not keep the migration pending"
 
-# The shim mise put ahead of ~/.local/bin is what the agent would run until
-# the environment goes; it goes with the uninstall, and so does the saved
-# wrapper, since once the environment is gone the proof would only keep
-# --check saying no and claim an environment the user builds later.
-write_hermes
-saved="$test_home/.local/bin/.hermes-before-desktop.abc123"
-mkdir -p "$saved"
-write_legacy_stub "$saved/hermes"
-cp "$hermes" "$mock_bin/hermes"
-: >"$mise_log"; rm -f "$mise_log.removed" "$mise_log.unrequested"
-run_installer --check && fail "--check calls a handover with the shim still ahead finished"
-OMARCHY_TEST_MISE_BUILT=1 OMARCHY_TEST_SHIM="$mock_bin/hermes" run_installer --now || fail "--now finishes the handover over a saved wrapper" "$(cat "$test_tmp/output")"
-grep -qF "mise uninstall --all pipx:hermes-agent[extras=all]" "$mise_log" || fail "--now retires the environment the saved wrapper proves Omarchy's" "$(cat "$mise_log")"
-[[ ! -e $mock_bin/hermes ]] || fail "the shim is gone with the environment"
-[[ ! -e $saved/hermes && ! -d $saved ]] || fail "the saved wrapper and its empty directory go once the environment is gone"
-run_installer --check || fail "--check follows a finished handover" "$(cat "$test_tmp/output")"
-pass "--now retires the mise Hermes once the runtime installer has saved the wrapper aside"
+# --now finishing a handover, mise environment and shim included, needs the
+# package fixtures and lives in hermes-desktop-install-test.sh.

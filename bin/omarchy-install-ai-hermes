@@ -10,11 +10,7 @@ if (( EUID == 0 )); then
   exit 1
 fi
 
-# The package goes in here, before the runtime installer runs, because the
-# installer stands aside for a Hermes the user set up themselves only while the
-# app is absent. Asked for by name, the app needs the runtime it prepares.
-echo "Installing Hermes Desktop..."
-omarchy-pkg-add hermes-desktop
+# The same install the default agent gets, plus opening the window.
 omarchy-install-hermes-cli --now
 
 echo "Opening Hermes Desktop..."

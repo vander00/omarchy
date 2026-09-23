@@ -175,6 +175,26 @@ cat >"$test_tmp/bin/systemd-run" <<'MOCK'
 #!/bin/bash
 printf 'theme-start\n' >>"$OMARCHY_TEST_ROOT/events"
 MOCK
+# The only thing the installer asks mise is to remove what the retired wrapper
+# built. `where` finds that environment and `ls -g` lists it while a test says
+# it was built and it has not been uninstalled and unrequested; uninstalling
+# also takes the shim stand-in named in OMARCHY_TEST_SHIM, as mise's does.
+cat >"$test_tmp/bin/mise" <<'MOCK'
+#!/bin/bash
+printf 'mise %s\n' "$*" >>"$OMARCHY_TEST_ROOT/mise-log"
+case "$1" in
+  where) [[ ${OMARCHY_TEST_MISE_BUILT:-0} == 1 && ! -e $OMARCHY_TEST_ROOT/mise-removed ]] ;;
+  ls)
+    if [[ ${OMARCHY_TEST_MISE_BUILT:-0} == 1 && ! -e $OMARCHY_TEST_ROOT/mise-unrequested ]]; then
+      echo '{"pipx:hermes-agent[extras=all]": [{"version": "latest"}]}'
+    else
+      echo '{}'
+    fi
+    ;;
+  rm) touch "$OMARCHY_TEST_ROOT/mise-unrequested" ;;
+  uninstall) touch "$OMARCHY_TEST_ROOT/mise-removed"; rm -f "${OMARCHY_TEST_SHIM:-}" ;;
+esac
+MOCK
 chmod +x "$test_tmp/bin/"*
 
 # Substitute only system package paths in scratch copies of the actual scripts.
@@ -279,6 +299,28 @@ run_installer && fail "a newer runtime cannot receive an older native app"
 [[ ! -e $native ]] || fail "no mismatched native app was copied"
 grep -q 'hermes desktop --build-only' "$test_tmp/output" || fail "missing newer native app has actionable guidance"
 assert_stopped "a missing updated app prevents launch and theme setup"
+# The refusal comes before anything is touched: a launcher of the user's own
+# beside that newer runtime is neither saved aside nor replaced by a run that
+# is going to stop anyway.
+own_launcher="#!/bin/bash
+exec \"$test_home/tools/hermes\" \"\$@\""
+printf '%s\n' "$own_launcher" >"$test_home/.local/bin/hermes"
+: >"$test_tmp/events"
+run_cli --now && fail "a newer runtime with a launcher of its own still stops"
+grep -q 'hermes desktop --build-only' "$test_tmp/output" || fail "the stop still carries the build-only guidance" "$(cat "$test_tmp/output")"
+[[ $(cat "$test_home/.local/bin/hermes") == "$own_launcher" ]] || fail "a run that stops leaves the user's launcher as it was"
+[[ -z $(find "$test_home/.local/bin" -maxdepth 1 -name '.hermes-before-desktop.*' -print) ]] || fail "a run that stops saves nothing aside"
+[[ ! -s $test_tmp/events ]] || fail "a run that stops writes no commands" "$(cat "$test_tmp/events")"
+# A git state that cannot be read is a refusal too, not a clean tree: back at
+# the release with the index unreadable, the launcher is still left alone.
+git -C "$runtime" checkout -q --detach "$release_commit"
+chmod 000 "$runtime/.git/index"
+: >"$test_tmp/events"
+run_cli --now && { chmod 644 "$runtime/.git/index"; fail "an unreadable git state is not a clean tree"; }
+chmod 644 "$runtime/.git/index"
+grep -q 'Could not read' "$test_tmp/output" || fail "an unreadable git state is named" "$(cat "$test_tmp/output")"
+[[ $(cat "$test_home/.local/bin/hermes") == "$own_launcher" ]] || fail "an unreadable git state leaves the user's launcher as it was"
+[[ ! -s $test_tmp/events ]] || fail "an unreadable git state writes no commands" "$(cat "$test_tmp/events")"
 pass "updated runtimes are preserved and never seeded with the old packaged app"
 
 new_home dirty-desktop
@@ -350,7 +392,7 @@ printf 'local edit\n' >"$runtime/runtime.txt"
 : >"$test_tmp/events"
 run_installer || fail "a finished install with local edits is accepted" "$(cat "$test_tmp/output")"
 [[ $(cat "$runtime/runtime.txt") == 'local edit' ]] || fail "local edits to a finished runtime are preserved"
-[[ $(cat "$test_tmp/events") == $'package hermes-desktop\nlaunch' ]] || fail "a finished install is only opened" "$(cat "$test_tmp/events")"
+[[ $(cat "$test_tmp/events") == launch ]] || fail "a finished install is only opened" "$(cat "$test_tmp/events")"
 pass "a finished install is left as the user has it"
 
 new_home full-history-retry
@@ -516,14 +558,14 @@ fi
 SH
 chmod +x "$test_home/.local/bin/hermes"
 own_hermes=$(cat "$test_home/.local/bin/hermes")
-run_cli --now || fail "the default agent path accepts the user's own Hermes" "$(cat "$test_tmp/output")"
-[[ ! -s $test_tmp/events ]] || fail "a working Hermes of the user's own has the app installed beside it" "$(cat "$test_tmp/events")"
-[[ $(cat "$test_home/.local/bin/hermes") == "$own_hermes" ]] || fail "the user's own hermes command is left alone"
-run_installer || fail "the app installs over the user's own Hermes" "$(cat "$test_tmp/output")"
-grep -qx bootstrap "$test_tmp/events" || fail "the app sets up its own runtime"
+run_cli --check && fail "--check calls a Hermes from elsewhere the app's"
+run_cli --now || fail "choosing Hermes installs the app over a Hermes from elsewhere" "$(cat "$test_tmp/output")"
+[[ $(head -2 "$test_tmp/events") == $'package hermes-desktop\nbootstrap' ]] || fail "the app and its runtime are installed over a Hermes from elsewhere" "$(cat "$test_tmp/events")"
 backups=("$test_home/.local/bin/".hermes-before-desktop.*)
-[[ ${#backups[@]} == 1 && $(cat "${backups[0]}/hermes") == "$own_hermes" ]] || fail "the user's own hermes command is saved aside"
-pass "the default agent path stands aside for the user's own Hermes; the app supersedes it"
+[[ ${#backups[@]} == 1 && $(cat "${backups[0]}/hermes") == "$own_hermes" ]] || fail "the previous hermes command is saved aside"
+grep -qF "$hermes_home/" "$test_home/.local/bin/hermes" || fail "the command is now the app's"
+run_cli --check || fail "--check follows the app's Hermes"
+pass "Hermes is only installed through the app: a Hermes from elsewhere is superseded, its command saved aside"
 
 # A finished runtime whose command is gone, or not its own, gets its command
 # back from upstream's path stage alone: no bootstrap, the runtime untouched,
@@ -566,6 +608,28 @@ grep -qF "$test_tmp/bin/hermes" "$test_tmp/output" || fail "--now names the comm
 rm -f "$test_tmp/bin/hermes"
 run_cli --check || fail "--check follows the install once nothing shadows it"
 pass "a hermes ahead of ~/.local/bin on PATH is reported, not set up over"
+
+# A machine that chose Hermes before its migration ran: the wrapper's copy the
+# runtime setup saved aside proves the mise environment Omarchy's, and mise's
+# shim for it sits ahead of ~/.local/bin. Choosing Hermes again finishes the
+# handover: the environment goes, the shim and the saved copy with it, and
+# only then is the command the one PATH finds.
+new_home handover
+run_cli --now || fail "handover fixture sets up" "$(cat "$test_tmp/output")"
+saved="$test_home/.local/bin/.hermes-before-desktop.mise01"
+mkdir -p "$saved"
+printf '%s\n' "#!/bin/bash" "# Written by omarchy-install-hermes-cli." >"$saved/hermes"
+cp "$test_home/.local/bin/hermes" "$test_tmp/bin/hermes"
+: >"$test_tmp/mise-log"; rm -f "$test_tmp/mise-removed" "$test_tmp/mise-unrequested"
+OMARCHY_TEST_MISE_BUILT=1 run_cli --check && fail "--check calls a handover with the mise environment still there finished"
+: >"$test_tmp/events"
+OMARCHY_TEST_MISE_BUILT=1 OMARCHY_TEST_SHIM="$test_tmp/bin/hermes" run_cli --now || fail "--now finishes the handover" "$(cat "$test_tmp/output")"
+grep -q 'mise uninstall --all' "$test_tmp/mise-log" || fail "the environment the saved wrapper proves Omarchy's is removed" "$(cat "$test_tmp/mise-log")"
+[[ ! -e $test_tmp/bin/hermes ]] || fail "the shim is gone with the environment"
+[[ ! -e $saved/hermes && ! -d $saved ]] || fail "the saved wrapper and its directory go once the environment is gone"
+[[ ! -s $test_tmp/events ]] || fail "the handover sets nothing up again" "$(cat "$test_tmp/events")"
+run_cli --check || fail "--check follows the finished handover"
+pass "choosing Hermes again before the migration finishes the handover: the mise Hermes and its shim go"
 
 new_home custom-profile
 hermes_home="$test_home/custom home"

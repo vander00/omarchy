@@ -227,18 +227,26 @@ pass "a linked backup directory is neither proof nor touched"
 write_stub
 OMARCHY_TEST_DEFAULT_AGENT=hermes OMARCHY_TEST_MISE_BUILT=1 run_migration || fail "the migration succeeds for a Hermes default agent"
 grep -q 'omarchy default agent hermes' "$test_tmp/output" || fail "a default agent that just went is told how to come back" "$(cat "$test_tmp/output")"
-cat >"$hermes" <<'SH'
+# A working Hermes is the app's: the package, its runtime finished and seeded,
+# and the command upstream's installer wrote for it.
+app_runtime="$test_home/.hermes/hermes-agent"
+mkdir -p "$app_runtime/apps/desktop/release/linux-unpacked/resources"
+touch "$app_runtime/.hermes-bootstrap-complete" "$app_runtime/apps/desktop/release/linux-unpacked/resources/app.asar" "$app_runtime/apps/desktop/release/linux-unpacked/resources/install-stamp.json"
+printf '#!/bin/bash\nexit 0\n' >"$app_runtime/apps/desktop/release/linux-unpacked/Hermes"
+chmod +x "$app_runtime/apps/desktop/release/linux-unpacked/Hermes"
+cat >"$hermes" <<SH
 #!/bin/bash
-if [[ ${1:-} == "chat" && ${2:-} == "--help" ]]; then
+# stands in for: exec "$app_runtime/venv/bin/python" "$app_runtime/hermes" "\$@"
+if [[ \${1:-} == "chat" && \${2:-} == "--help" ]]; then
   echo "[-q QUERY, --query QUERY] [--tui]"
 else
   echo "hermes-agent 0.0.0-test"
 fi
 SH
 chmod +x "$hermes"
-OMARCHY_TEST_DEFAULT_AGENT=hermes run_migration || fail "the migration succeeds with a working Hermes"
-! grep -q 'default agent' "$test_tmp/output" || fail "a working Hermes gets reinstall guidance"
-rm -f "$hermes"
+OMARCHY_TEST_DESKTOP_INSTALLED=1 OMARCHY_TEST_DEFAULT_AGENT=hermes run_migration || fail "the migration succeeds with the app's Hermes in place"
+! grep -q 'default agent' "$test_tmp/output" || fail "the app's own Hermes gets reinstall guidance" "$(cat "$test_tmp/output")"
+rm -rf "$hermes" "$test_home/.hermes"
 OMARCHY_TEST_DEFAULT_AGENT=codex run_migration || fail "the migration succeeds for another default agent"
 ! grep -q 'default agent' "$test_tmp/output" || fail "another default agent gets Hermes guidance"
 pass "the migration says how to reinstall a Hermes that was the default agent"
