@@ -94,3 +94,37 @@ printf '%s\n' "../escaped" >"$current_state/theme.name"
 set_theme "$theme_b"
 [[ ! -e $test_home/.local/state/omarchy/escaped ]] || fail "invalid theme names cannot escape the background state directory"
 pass "invalid theme names cannot escape the background state directory"
+
+# Interactive switches choose before swapping the staged theme into place.
+source <(awk '
+  /^(theme_background_state_file|choose_theme_background|choose_staged_theme_background)\(\) \{/ { copying=1 }
+  copying { print }
+  copying && /^}$/ { copying=0 }
+' "$ROOT/bin/omarchy-theme-set")
+
+HOME="$test_home"
+CURRENT_THEME_PATH="$current_state/theme"
+NEXT_THEME_PATH="$current_state/next-theme"
+CURRENT_BACKGROUND_LINK="$current_state/background"
+THEME_BACKGROUND_STATE_PATH="$background_state"
+THEME_NAME="staged-test"
+PREVIOUS_THEME_NAME="$theme_b"
+mkdir -p "$NEXT_THEME_PATH/backgrounds"
+printf 'first\n' >"$NEXT_THEME_PATH/backgrounds/first.png"
+printf 'selected\n' >"$NEXT_THEME_PATH/backgrounds/selected.mp4"
+printf '%s\n' "$CURRENT_THEME_PATH/backgrounds/selected.mp4" >"$background_state/$THEME_NAME"
+choose_staged_theme_background
+[[ $CHOSEN_THEME_BACKGROUND == "$CURRENT_THEME_PATH/backgrounds/selected.mp4" ]] || fail "staged selection restores a remembered file absent from the outgoing theme"
+pass "staged selection restores a remembered file absent from the outgoing theme"
+
+printf 'outgoing only\n' >"$CURRENT_THEME_PATH/backgrounds/outgoing-only.png"
+printf '%s\n' "$CURRENT_THEME_PATH/backgrounds/outgoing-only.png" >"$background_state/$THEME_NAME"
+choose_staged_theme_background
+[[ $CHOSEN_THEME_BACKGROUND == "$CURRENT_THEME_PATH/backgrounds/first.png" ]] || fail "staged selection rejects remembered files absent from the incoming theme"
+pass "staged selection rejects remembered files absent from the incoming theme"
+
+PREVIOUS_THEME_NAME="$THEME_NAME"
+ln -nsf "$CURRENT_THEME_PATH/backgrounds/first.png" "$CURRENT_BACKGROUND_LINK"
+choose_staged_theme_background
+[[ $CHOSEN_THEME_BACKGROUND == "$CURRENT_THEME_PATH/backgrounds/selected.mp4" ]] || fail "staged same-theme selection still cycles backgrounds"
+pass "staged same-theme selection still cycles backgrounds"
