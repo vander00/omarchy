@@ -368,19 +368,24 @@ if runtime_ready; then
   runtime_present=true
 fi
 
+# A seeded app has to be whole, whatever state the runtime beside it is in.
+refuse_unless_app_whole() {
+  if [[ -e $native_app || -L $native_app ]] && ! native_app_complete; then
+    echo "The Hermes desktop app at $native_app is incomplete. Repair it with 'hermes desktop --build-only' before trying again." >&2
+    return 1
+  fi
+}
+
 # The packaged app can be seeded only beside a runtime at the release it was
-# built from, with its desktop sources untouched, and a seeded app has to be
-# whole. Asked before a command is replaced, so that a refusal leaves the
-# user's Hermes exactly as it was, and again before seeding.
+# built from, with its desktop sources untouched and the Linux runtime patch
+# still able to land. Asked before a command is replaced, so that a refusal
+# leaves the user's Hermes exactly as it was, and again before seeding.
 # Asked through ||, so nothing in here stops on its own: every git answer is
 # checked, and one that cannot be read refuses rather than reading as clean.
 refuse_unless_seedable() {
   local runtime_commit changes
+  refuse_unless_app_whole || return 1
   if [[ -e $native_app || -L $native_app ]]; then
-    if ! native_app_complete; then
-      echo "The Hermes desktop app at $native_app is incomplete. Repair it with 'hermes desktop --build-only' before trying again." >&2
-      return 1
-    fi
     return 0
   fi
   if ! runtime_commit=$(git -C "$runtime" rev-parse HEAD 2>/dev/null) || [[ -z $runtime_commit ]]; then
@@ -399,25 +404,30 @@ refuse_unless_seedable() {
     echo "Hermes desktop sources have local changes. Run 'hermes desktop --build-only', then try again; existing files have been kept." >&2
     return 1
   fi
+  if ! git -C "$runtime" apply --check /usr/share/hermes-desktop/runtime.patch >/dev/null 2>&1 &&
+    ! git -C "$runtime" apply --reverse --check /usr/share/hermes-desktop/runtime.patch >/dev/null 2>&1; then
+    echo "The Hermes Linux runtime patch conflicts with local changes. Existing files have been kept." >&2
+    return 1
+  fi
 }
 
 if [[ $runtime_present == "true" ]]; then
   refuse_unless_seedable || exit 1
+elif [[ -e $runtime || -L $runtime ]]; then
+  # The upstream installer can reset an existing checkout. Do not pin a newer
+  # or modified runtime back to the package release while repairing setup,
+  # and a git state that cannot be read is not a clean one.
+  refuse_unless_app_whole || exit 1
+  if ! runtime_commit=$(git -C "$runtime" rev-parse HEAD 2>/dev/null) || [[ $runtime_commit != "$release_commit" ]] ||
+    ! changes=$(git -C "$runtime" status --porcelain --untracked-files=all 2>/dev/null) || [[ -n $changes ]]; then
+    echo "Hermes setup is incomplete at $runtime. Repair that installation before trying again; existing files have been kept." >&2
+    exit 1
+  fi
 fi
 
 # Whether this run gave Hermes something new to show the theme to: a runtime
 # it set up, or the app it seeded. Putting a command back is neither.
 set_up=false
-
-if [[ $runtime_present == "false" && ( -e $runtime || -L $runtime ) ]]; then
-  # The upstream installer can reset an existing checkout. Do not pin a newer
-  # or modified runtime back to the package release while repairing setup.
-  if [[ $(git -C "$runtime" rev-parse HEAD 2>/dev/null) != "$release_commit" ]] ||
-    [[ -n $(git -C "$runtime" status --porcelain --untracked-files=all) ]]; then
-    echo "Hermes setup is incomplete at $runtime. Repair that installation before trying again; existing files have been kept." >&2
-    exit 1
-  fi
-fi
 
 # The command is the runtime's own and runs; anything else at the path gets
 # replaced below. The retired wrapper is never run to find out.

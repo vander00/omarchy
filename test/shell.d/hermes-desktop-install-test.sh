@@ -384,6 +384,50 @@ run_installer && fail "incomplete modified runtime cannot be reset by upstream i
 ! grep -qx bootstrap "$test_tmp/events" || fail "modified runtime never reaches upstream installer"
 pass "patch conflicts and incomplete modified runtimes retain local changes and stop safely"
 
+# Every refusal comes before anything of the user's is touched, whatever state
+# the runtime is in: a launcher of their own is neither saved aside nor
+# replaced, and no bootstrap runs, by a run that is going to stop anyway.
+own_launcher="#!/bin/bash
+exec \"$test_home/tools/hermes\" \"\$@\""
+assert_untouched() {
+  [[ $(cat "$test_home/.local/bin/hermes") == "$own_launcher" ]] || fail "$1: the user's launcher is not as it was"
+  [[ -z $(find "$test_home/.local/bin" -maxdepth 1 -name '.hermes-before-desktop.*' -print) ]] || fail "$1: something was saved aside"
+  [[ ! -s $test_tmp/events ]] || fail "$1: setup ran" "$(cat "$test_tmp/events")"
+}
+# A finished runtime at the release whose edit the runtime patch cannot land on.
+new_home patch-conflict-own-launcher
+touch "$test_tmp/package-installed"
+HOME="$test_home" HERMES_HOME="$hermes_home" bash "$test_tmp/share/install.sh" --dir "$runtime" --hermes-home "$hermes_home"
+printf 'local edit\n' >"$runtime/runtime.txt"
+printf '%s\n' "$own_launcher" >"$test_home/.local/bin/hermes"
+: >"$test_tmp/events"
+run_cli --now && fail "a conflicting edit still stops setup"
+grep -q 'patch conflicts' "$test_tmp/output" || fail "a conflicting edit is named" "$(cat "$test_tmp/output")"
+assert_untouched "a patch conflict"
+# An unfinished runtime beside a half-built app.
+new_home incomplete-app
+touch "$test_tmp/package-installed"
+OMARCHY_TEST_NO_MARKER=1 HOME="$test_home" HERMES_HOME="$hermes_home" bash "$test_tmp/share/install.sh" --dir "$runtime" --hermes-home "$hermes_home"
+mkdir -p "$native/resources"
+printf 'half\n' >"$native/resources/app.asar"
+printf '%s\n' "$own_launcher" >"$test_home/.local/bin/hermes"
+: >"$test_tmp/events"
+run_cli --now && fail "a half-built app beside an unfinished runtime still stops setup"
+grep -q 'is incomplete' "$test_tmp/output" || fail "a half-built app is named" "$(cat "$test_tmp/output")"
+assert_untouched "a half-built app"
+# An unfinished runtime whose git state cannot be read is not a clean one.
+new_home unreadable-incomplete
+touch "$test_tmp/package-installed"
+OMARCHY_TEST_NO_MARKER=1 HOME="$test_home" HERMES_HOME="$hermes_home" bash "$test_tmp/share/install.sh" --dir "$runtime" --hermes-home "$hermes_home"
+printf '%s\n' "$own_launcher" >"$test_home/.local/bin/hermes"
+chmod 000 "$runtime/.git/index"
+: >"$test_tmp/events"
+run_cli --now && { chmod 644 "$runtime/.git/index"; fail "an unreadable git state beside an unfinished runtime is not a clean tree"; }
+chmod 644 "$runtime/.git/index"
+grep -q 'incomplete at' "$test_tmp/output" || fail "an unreadable git state is refused as incomplete" "$(cat "$test_tmp/output")"
+assert_untouched "an unreadable git state"
+pass "a refusal leaves the user's launcher and runtime as they were, whatever state the runtime is in"
+
 # Once set up, a runtime is the user's to edit; a finished install is not
 # re-patched or re-verified, only opened.
 new_home finished-edit
@@ -543,9 +587,8 @@ run_cli --now || fail "a finished install is accepted by the default agent path"
 run_cli --check || fail "--check follows the installed runtime"
 pass "choosing Hermes as the default agent installs the app's runtime without opening the app"
 
-# A Hermes the user set up themselves is what the default agent runs, and
-# nothing is installed beside it. Asked for the app by name, Omarchy installs
-# the package first, and then the runtime supersedes it with the command saved.
+# A Hermes from elsewhere is not the app's: choosing Hermes installs the app
+# over it, with the previous command saved aside.
 new_home own-hermes
 mkdir -p "$test_home/.local/bin"
 cat >"$test_home/.local/bin/hermes" <<'SH'
