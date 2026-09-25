@@ -13,7 +13,7 @@ printf '%s\n' '-- corrected packaged provider' >"$test_home/package.lua"
 cat >"$test_home/bin/pacman" <<'STUB'
 #!/bin/bash
 [[ $* == '-Q omarchy-nvim' ]] || exit 1
-printf 'omarchy-nvim %s\n' "${TEST_NVIM_VERSION:-2026.8.13-2}"
+printf 'omarchy-nvim %s\n' "${TEST_NVIM_VERSION:-2026.9.21-2}"
 STUB
 chmod +x "$test_home/bin/pacman"
 run_migration() {
@@ -50,9 +50,11 @@ cmp "$provider" "$test_home/custom.lua" || fail "unrelated provider is preserved
 pass "customized and unrelated providers are preserved"
 
 cp "$SHELL_TEST_DIR/fixtures/neovim-clipboard/june.lua" "$provider"
-export TEST_NVIM_VERSION=2026.8.13-1
-if run_migration; then fail "old package leaves migration pending"; fi
-cmp "$provider" "$SHELL_TEST_DIR/fixtures/neovim-clipboard/june.lua" || fail "old package leaves provider unchanged"
+for TEST_NVIM_VERSION in 2026.8.13-1 2026.8.13-2 2026.9.21-1; do
+  export TEST_NVIM_VERSION
+  if run_migration; then fail "old package leaves migration pending: $TEST_NVIM_VERSION"; fi
+  cmp "$provider" "$SHELL_TEST_DIR/fixtures/neovim-clipboard/june.lua" || fail "old package leaves provider unchanged"
+done
 unset TEST_NVIM_VERSION
 mv "$test_home/package.lua" "$test_home/package.saved"
 if run_migration; then fail "missing package source leaves migration pending"; fi

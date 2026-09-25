@@ -35,8 +35,8 @@ esac
 # Updates install packages before migrations. Refuse an older package so this
 # migration remains pending instead of installing the provider it must repair.
 nvim_package=$(pacman -Q omarchy-nvim)
-if [[ $(vercmp "${nvim_package#* }" "2026.8.13-2") == -* ]] || [[ ! -f $provider_source ]]; then
-  echo "Update omarchy-nvim to 2026.8.13-2 or newer before rerunning this migration." >&2
+if [[ $(vercmp "${nvim_package#* }" "2026.9.21-2") == -* ]] || [[ ! -f $provider_source ]]; then
+  echo "Update omarchy-nvim to 2026.9.21-2 or newer before rerunning this migration." >&2
   exit 1
 fi
 
