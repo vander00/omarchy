@@ -430,6 +430,25 @@ finally:
         gateway.wait(timeout=5)
 print('ok - an interpreter running a runtime script is Hermes and is stopped')
 
+# Run as a module from an activated venv, the interpreter is bare and the
+# script is nowhere on the command line; Hermes's own package name is.
+home, runtime, env = setup('module')
+(runtime / 'hermes_cli').mkdir(parents=True)
+(runtime / 'hermes_cli/__init__.py').write_text('')
+(runtime / 'hermes_cli/main.py').write_text('import time\ntime.sleep(30)\n')
+module = subprocess.Popen([sys.executable, '-m', 'hermes_cli.main', 'gateway', 'run'], cwd=scratch,
+                          env={**os.environ, 'PYTHONPATH': str(runtime)})
+try:
+    result = remove(env)
+    assert result.returncode == 0, result
+    assert 'Stopping Hermes (PIDs: ' + str(module.pid) in result.stdout, result.stdout
+    assert module.wait(timeout=5) != 0, 'hermes_cli run as a module is stopped'
+finally:
+    if module.poll() is None:
+        module.terminate()
+        module.wait(timeout=5)
+print('ok - hermes_cli run as a module from a bare interpreter is Hermes and is stopped')
+
 # A program whose executable lives in the runtime is Hermes whatever it was
 # started as: the Electron helpers name themselves by path, but a copy of the
 # binary started by a bare name is found through /proc/<pid>/exe.
